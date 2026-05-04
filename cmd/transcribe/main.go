@@ -47,6 +47,8 @@ type config struct {
 
 	noDiarize        bool
 	numSpeakers      int
+	targetSpeakers   int
+	speakerTolerance int
 	threshold        float64
 	segmentationOnnx string
 	embeddingOnnx    string
@@ -99,7 +101,9 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&cfg.whisperAPIKey, "whisper-api-key", apiKeyDefault, "Bearer token; defaults to $WHISPER_API_KEY.")
 	fs.StringVar(&cfg.language, "language", "en", "ISO-639-1 language hint. Empty for auto-detect.")
 	fs.BoolVar(&cfg.noDiarize, "no-diarize", false, "Skip speaker diarization; emit one line per segment.")
-	fs.IntVar(&cfg.numSpeakers, "num-speakers", 0, "Force N speakers (0 = auto via clustering).")
+	fs.IntVar(&cfg.numSpeakers, "num-speakers", 0, "Force exactly N speakers (0 = soft target, see --target-speakers).")
+	fs.IntVar(&cfg.targetSpeakers, "target-speakers", 4, "Soft target speaker count when --num-speakers=0. 0 disables.")
+	fs.IntVar(&cfg.speakerTolerance, "speaker-tolerance", 2, "Allow up to target+tolerance distinct speakers; merge the rest.")
 	fs.Float64Var(&cfg.threshold, "speaker-threshold", 0.5, "Clustering threshold when --num-speakers=0.")
 	fs.StringVar(&cfg.segmentationOnnx, "segmentation-model", "", "Path to pyannote segmentation ONNX. Empty = auto-cache.")
 	fs.StringVar(&cfg.embeddingOnnx, "embedding-model", "", "Path to speaker-embedding ONNX. Empty = auto-cache.")
@@ -222,12 +226,23 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 				return fmt.Errorf("diarize: %w", err)
 			}
 			turns = t
-			log.Info("diarization complete", "turns", len(t))
+			log.Info("diarization complete", "turns", len(t), "raw_speakers", distinctSpeakers(t))
 			return nil
 		})
 	}
 	if err := g.Wait(); err != nil {
 		return err
+	}
+
+	if !cfg.noDiarize && cfg.numSpeakers == 0 && cfg.targetSpeakers > 0 {
+		before := distinctSpeakers(turns)
+		turns = diarize.MergeToTarget(turns, cfg.targetSpeakers, cfg.speakerTolerance)
+		after := distinctSpeakers(turns)
+		if before != after {
+			log.Info("merged sparse speakers",
+				"before", before, "after", after,
+				"target", cfg.targetSpeakers, "tolerance", cfg.speakerTolerance)
+		}
 	}
 
 	lines := buildLines(log, result, turns, cfg.noDiarize)
@@ -296,6 +311,14 @@ func openOutput(cfg config) (out *os.File, closeFn func(), err error) {
 		return nil, nil, fmt.Errorf("create %q: %w", dst, err)
 	}
 	return f, func() { _ = f.Close() }, nil
+}
+
+func distinctSpeakers(turns []diarize.Turn) int {
+	seen := make(map[int]struct{}, len(turns))
+	for _, t := range turns {
+		seen[t.Speaker] = struct{}{}
+	}
+	return len(seen)
 }
 
 func version() string {

@@ -55,15 +55,24 @@ Override either with `--segmentation-model` / `--embedding-model` to use differe
 
 ## Speaker count
 
-The default clustering threshold (0.5, sherpa-onnx's default) tends to over-cluster on real-world conversational recordings — sessions with 4 actual people can produce 20+ "speakers" because the embedder distinguishes voice within the same speaker too aggressively when audio is noisy.
+Sherpa-onnx's default threshold-based clustering over-segments real-world conversational audio — a session with 4 actual people can produce 20+ "speakers" because the embedder distinguishes voice within the same speaker too aggressively when audio is noisy. To absorb that, the tool soft-targets a cluster count and folds low-duration "speakers" into their temporal neighbors after diarization.
 
-If you know the speaker count, **pass it explicitly**:
+Defaults:
 
-```bash
-transcribe --num-speakers 4 session.mkv
-```
+| Flag | Default | Meaning |
+|---|---|---|
+| `--num-speakers` | 0 | Force exactly N. 0 = soft target. |
+| `--target-speakers` | 4 | Aim for ~N distinct speakers. 0 disables the post-merge. |
+| `--speaker-tolerance` | 2 | Allow up to `target+tolerance` distinct speakers. Anything past that cap gets merged. |
+| `--speaker-threshold` | 0.5 | Sherpa clustering threshold (only used when `--num-speakers=0`). |
 
-If you don't, try raising `--speaker-threshold` toward 0.7–0.8.
+Tuning:
+
+- **Different group size?** `transcribe --target-speakers 6 session.mkv` (or any other count).
+- **Need exact N speakers?** `transcribe --num-speakers 4 session.mkv` — bypasses soft-merge entirely.
+- **Want the raw clustering output?** `transcribe --target-speakers 0 session.mkv`.
+
+The per-run log shows the merge: `diarization complete turns=75 raw_speakers=28` followed by `merged sparse speakers before=28 after=6`.
 
 ## Backends
 
