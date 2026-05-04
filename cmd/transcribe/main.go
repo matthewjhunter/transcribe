@@ -47,9 +47,6 @@ type config struct {
 
 	noDiarize        bool
 	numSpeakers      int
-	targetSpeakers   int
-	speakerTolerance int
-	threshold        float64
 	minSpeechDur     float64
 	minSilenceDur    float64
 	diarizeThreads   int
@@ -106,10 +103,7 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&cfg.whisperAPIKey, "whisper-api-key", apiKeyDefault, "Bearer token; defaults to $WHISPER_API_KEY.")
 	fs.StringVar(&cfg.language, "language", "en", "ISO-639-1 language hint. Empty for auto-detect.")
 	fs.BoolVar(&cfg.noDiarize, "no-diarize", false, "Skip speaker diarization; emit one line per segment.")
-	fs.IntVar(&cfg.numSpeakers, "num-speakers", 0, "Force exactly N speakers (0 = soft target, see --target-speakers).")
-	fs.IntVar(&cfg.targetSpeakers, "target-speakers", 4, "Soft target speaker count when --num-speakers=0. 0 disables.")
-	fs.IntVar(&cfg.speakerTolerance, "speaker-tolerance", 2, "Allow up to target+tolerance distinct speakers; merge the rest.")
-	fs.Float64Var(&cfg.threshold, "speaker-threshold", 0.5, "Clustering threshold when --num-speakers=0.")
+	fs.IntVar(&cfg.numSpeakers, "num-speakers", 0, "Required (unless --no-diarize). Number of distinct speakers in the recording.")
 	fs.Float64Var(&cfg.minSpeechDur, "min-speech-duration", 0, "Drop speech segments shorter than N seconds. 0 = sherpa default.")
 	fs.Float64Var(&cfg.minSilenceDur, "min-silence-duration", 0, "Merge speech segments separated by < N seconds of silence. 0 = sherpa default.")
 	fs.IntVar(&cfg.diarizeThreads, "diarize-threads", 0, "Threads for sherpa segmentation/embedding stages. 0 = NumCPU.")
@@ -142,6 +136,11 @@ func parseFlags(args []string) (config, error) {
 		return config{}, errors.New("transcribe: exactly one input file is required")
 	}
 	cfg.input = fs.Arg(0)
+
+	if !cfg.noDiarize && cfg.numSpeakers <= 0 {
+		fs.Usage()
+		return config{}, errors.New("transcribe: --num-speakers must be set to a positive integer (or pass --no-diarize)")
+	}
 
 	switch strings.ToLower(format) {
 	case "tstxt":
@@ -193,7 +192,6 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 			SegmentationModel: segPath,
 			EmbeddingModel:    embPath,
 			NumSpeakers:       cfg.numSpeakers,
-			Threshold:         float32(cfg.threshold),
 			MinDurationOn:     float32(cfg.minSpeechDur),
 			MinDurationOff:    float32(cfg.minSilenceDur),
 			NumThreads:        cfg.diarizeThreads,
@@ -247,17 +245,6 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 	}
 	if err := g.Wait(); err != nil {
 		return err
-	}
-
-	if !cfg.noDiarize && cfg.numSpeakers == 0 && cfg.targetSpeakers > 0 {
-		before := distinctSpeakers(turns)
-		turns = diarize.MergeToTarget(turns, cfg.targetSpeakers, cfg.speakerTolerance)
-		after := distinctSpeakers(turns)
-		if before != after {
-			log.Info("merged sparse speakers",
-				"before", before, "after", after,
-				"target", cfg.targetSpeakers, "tolerance", cfg.speakerTolerance)
-		}
 	}
 
 	lines := buildLines(log, result, turns, cfg.noDiarize)

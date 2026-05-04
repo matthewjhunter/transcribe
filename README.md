@@ -16,28 +16,26 @@ CGO is required (sherpa-onnx wraps a C library; the prebuilt `libonnxruntime.so`
 
 ## Usage
 
-```bash
-# Default: writes <input>.txt next to the input, with [HH:MM:SS] [SPEAKER_NN]: text
-transcribe path/to/recording.mkv
+`--num-speakers` is required and intentionally has no default. The expected workflow is to count speakers from the recording (Roll20 attendees, Discord participants, etc.) and pass the exact number — wrong defaults produce wrong attribution, and clustering quality depends entirely on giving sherpa the right K.
 
-# Pass --num-speakers when you know the count — clustering quality is much better
-# than auto-discovery on real conversational audio
+```bash
+# Standard run: writes <input>.txt with [HH:MM:SS] [SPEAKER_NN]: text
 transcribe --num-speakers 4 path/to/recording.mkv
 
 # Pin to a specific Lemonade host
-transcribe --whisper-url http://halo:13305/api/v1 path/to/recording.mkv
+transcribe --whisper-url http://halo:13305/api/v1 --num-speakers 4 session.mkv
 
 # Match the historical WhisperX `[SPEAKER_NN]: text` format byte-for-byte
-transcribe --output-format wxtxt path/to/recording.mkv
+transcribe --output-format wxtxt --num-speakers 4 session.mkv
 
 # Stream to stdout
-transcribe -o - path/to/recording.mkv
+transcribe --num-speakers 4 -o - session.mkv
 
-# Skip diarization entirely
-transcribe --no-diarize path/to/recording.mkv
+# Skip diarization entirely (no --num-speakers needed)
+transcribe --no-diarize session.mkv
 
 # Structured output for downstream pipelines
-transcribe --output-format json path/to/recording.mkv
+transcribe --num-speakers 4 --output-format json session.mkv
 ```
 
 Run `transcribe -h` for the full flag list.
@@ -49,40 +47,24 @@ On first run with diarization enabled, the tool downloads two ONNX files into `$
 | File | Source | Purpose |
 |---|---|---|
 | `sherpa-onnx-pyannote-segmentation-3-0.onnx` | sherpa-onnx releases (extracted from `.tar.bz2`) | Pyannote 3.0 speaker segmentation |
-| `nemo_en_titanet_small.onnx` | sherpa-onnx releases | NeMo TitaNet English speaker embeddings |
+| `nemo_en_titanet_large.onnx` | sherpa-onnx releases | NeMo TitaNet (large) English speaker embeddings, default |
 
-Override either with `--segmentation-model` / `--embedding-model` to use different models without touching the cache.
+The default uses TitaNet *large* because the *small* variant fails to distinguish similar adult voices on conversational audio (e.g. two male players are often merged into one cluster). Large is ~95 MB and runs ~3× slower than small, but produces materially better attribution. Switch back with `--embedding-preset titanet_small` if speed matters more than accuracy.
 
-## Speaker count
-
-Sherpa-onnx's default threshold-based clustering over-segments real-world conversational audio — a session with 4 actual people can produce 20+ "speakers" because the embedder distinguishes voice within the same speaker too aggressively when audio is noisy. To absorb that, the tool soft-targets a cluster count and folds low-duration "speakers" into their temporal neighbors after diarization.
-
-| Flag | Default | Meaning |
-|---|---|---|
-| `--num-speakers` | 0 | Force exactly N. 0 = soft target. |
-| `--target-speakers` | 4 | Aim for ~N distinct speakers. 0 disables the post-merge. |
-| `--speaker-tolerance` | 2 | Allow up to `target+tolerance` distinct speakers. The rest get merged. |
-
-Tuning:
-
-- **Different group size?** `transcribe --target-speakers 6 session.mkv`.
-- **Need exact N speakers?** `transcribe --num-speakers 4 session.mkv` — bypasses soft-merge.
-- **Want the raw clustering output?** `transcribe --target-speakers 0 session.mkv`.
-
-The per-run log shows the merge: `diarization complete turns=75 raw_speakers=28` followed by `merged sparse speakers before=28 after=6`.
+Override individual paths with `--segmentation-model` / `--embedding-model`.
 
 ## Sherpa knobs
 
-All sherpa-onnx diarization parameters are exposed for experimentation without rebuilding. None of them produced a dramatic improvement on conversational audio in our testing — the soft-target merge above is doing the heavy lifting — but they're available if you want to dig in.
+All sherpa-onnx diarization parameters are exposed for experimentation:
 
 | Flag | Default | Maps to |
 |---|---|---|
-| `--speaker-threshold` | 0.5 | `FastClusteringConfig.Threshold` (only used when `--num-speakers=0`). Lower → more clusters; higher → fewer. |
+| `--num-speakers` | (required) | `FastClusteringConfig.NumClusters`. Number of distinct speakers in the recording. |
 | `--min-speech-duration` | 0 | `OfflineSpeakerDiarizationConfig.MinDurationOn` (seconds). Drops short voice-activity segments at the segmenter. |
 | `--min-silence-duration` | 0 | `OfflineSpeakerDiarizationConfig.MinDurationOff` (seconds). Merges adjacent speech across short silences. |
 | `--diarize-threads` | 0 (NumCPU) | Threadpool size for sherpa's segmentation and embedding stages. |
 | `--diarize-provider` | `""` (cpu) | ONNX execution provider (`cpu`, `cuda`, ...). |
-| `--embedding-preset` | `titanet_small` | Selects the embedding ONNX. `titanet_small` (~22 MB) or `titanet_large` (~95 MB, ~3× slower, no measurable quality win on conversational audio in our tests). |
+| `--embedding-preset` | `titanet_large` | `titanet_small` (~22 MB, fast, low accuracy on similar voices) or `titanet_large` (~95 MB, default). |
 | `--segmentation-model` | auto-cache | Path to pyannote segmentation ONNX. |
 | `--embedding-model` | auto-cache | Path to speaker-embedding ONNX. Bypasses `--embedding-preset` when set. |
 
@@ -106,14 +88,14 @@ The Whisper response shape is normalized: top-level `words[]` (OpenAI) and neste
 
 ## Performance
 
-Indicative timing on Matthew's workstation against Lemonade-on-halo with `Whisper-Large-v3-Turbo`:
+Indicative timing on Matthew's workstation against Lemonade-on-halo with `Whisper-Large-v3-Turbo` and the default `titanet_large` embedding:
 
 | Input length | End-to-end |
 |---|---|
-| 30 s | 3 s |
-| 5 min | 15 s |
+| 30 s | ~5 s |
+| 5 min | ~23 s |
 
-Whisper time is dominated by network + backend; diarization runs CPU-locally.
+Whisper runs in parallel with diarization. Whisper time is dominated by network + backend; diarization runs CPU-locally and is the slower of the two on long inputs.
 
 ## Why this exists
 

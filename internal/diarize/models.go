@@ -39,7 +39,7 @@ const (
 	// audio at the cost of a slower diarization stage.
 	EmbeddingTitanetLarge EmbeddingPreset = "titanet_large"
 
-	DefaultEmbeddingPreset = EmbeddingTitanetSmall
+	DefaultEmbeddingPreset = EmbeddingTitanetLarge
 )
 
 type embeddingDescriptor struct {
