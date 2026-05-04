@@ -2,27 +2,102 @@
 
 CLI that produces a speaker-labeled transcript from an audio or video file.
 
-Designed to run end-to-end on a local workstation: Whisper transcription via an OpenAI-compatible HTTP backend (e.g. [Lemonade](https://lemonade-server.ai/)), speaker diarization via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), and word-level alignment of the two into a single output.
+The tool runs end-to-end on a local workstation: Whisper transcription via an OpenAI-compatible HTTP backend (e.g. [Lemonade](https://lemonade-server.ai/)), speaker diarization via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), and word-level alignment of the two — all in a single Go binary. No PyTorch, no Python at runtime.
 
-## Status
-
-Early — see `CLAUDE.md` for the design plan.
-
-## Usage (planned)
+## Install
 
 ```bash
-transcribe path/to/recording.mkv
-# → path/to/recording.txt   (SPEAKER_00..SPEAKER_NN labels, like WhisperX)
+go install github.com/matthewjhunter/transcribe/cmd/transcribe@latest
 ```
 
-## Why
+CGO is required (sherpa-onnx wraps a C library; the prebuilt `libonnxruntime.so` and `libsherpa-onnx-c-api.so` ship with the bindings and are linked via rpath). Linux/amd64 is the only target wired up today.
 
-The previous pipeline ran [WhisperX](https://github.com/m-bain/whisperX) on a CUDA host (rainbow, RTX 3080) over SSH. It works, but it pins the workflow to a remote machine, occupies VRAM that competes with Ollama, and ties speaker diarization to a PyTorch+pyannote stack that's awkward on AMD hardware.
+`ffmpeg` and `ffprobe` must be on `$PATH` for input decoding.
 
-This tool replaces that pipeline with components that run natively on a Strix Halo workstation (or any machine with a Lemonade-compatible Whisper endpoint and CPU/ONNX-capable diarization):
+## Usage
 
-- **Transcription**: Lemonade's `whispercpp` recipe (XDNA2 NPU acceleration on Strix Halo, GPU/CPU elsewhere) via the OpenAI `/v1/audio/transcriptions` endpoint.
-- **Diarization**: sherpa-onnx with pyannote segmentation + 3D-Speaker embedding ONNX models, CPU or DirectML.
-- **Alignment**: in-process Go logic that merges word-timestamped Whisper output with speaker segments.
+```bash
+# Default: writes <input>.txt next to the input, with [HH:MM:SS] [SPEAKER_NN]: text
+transcribe path/to/recording.mkv
 
-No PyTorch, no Python runtime at runtime, single binary (with sherpa-onnx shared library).
+# Pass --num-speakers when you know the count — clustering quality is much better
+# than auto-discovery on real conversational audio
+transcribe --num-speakers 4 path/to/recording.mkv
+
+# Pin to a specific Lemonade host
+transcribe --whisper-url http://halo:13305/api/v1 path/to/recording.mkv
+
+# Match the historical WhisperX `[SPEAKER_NN]: text` format byte-for-byte
+transcribe --output-format wxtxt path/to/recording.mkv
+
+# Stream to stdout
+transcribe -o - path/to/recording.mkv
+
+# Skip diarization entirely
+transcribe --no-diarize path/to/recording.mkv
+
+# Structured output for downstream pipelines
+transcribe --output-format json path/to/recording.mkv
+```
+
+Run `transcribe -h` for the full flag list.
+
+## Models
+
+On first run with diarization enabled, the tool downloads two ONNX files into `${XDG_CACHE_HOME:-$HOME/.cache}/transcribe/models/`:
+
+| File | Source | Purpose |
+|---|---|---|
+| `sherpa-onnx-pyannote-segmentation-3-0.onnx` | sherpa-onnx releases (extracted from `.tar.bz2`) | Pyannote 3.0 speaker segmentation |
+| `nemo_en_titanet_small.onnx` | sherpa-onnx releases | NeMo TitaNet English speaker embeddings |
+
+Override either with `--segmentation-model` / `--embedding-model` to use different models without touching the cache.
+
+## Speaker count
+
+The default clustering threshold (0.5, sherpa-onnx's default) tends to over-cluster on real-world conversational recordings — sessions with 4 actual people can produce 20+ "speakers" because the embedder distinguishes voice within the same speaker too aggressively when audio is noisy.
+
+If you know the speaker count, **pass it explicitly**:
+
+```bash
+transcribe --num-speakers 4 session.mkv
+```
+
+If you don't, try raising `--speaker-threshold` toward 0.7–0.8.
+
+## Backends
+
+`--whisper-url` accepts any OpenAI-compatible `/v1` base. Tested with:
+
+- **Lemonade** (`whispercpp` recipe): default. NPU-accelerated on Strix Halo when the `whisper-large-v3-encoder-vitisai.rai` cache is loaded.
+- **whisper.cpp server**: works as-is.
+- **OpenAI Whisper API**: pass `--whisper-url https://api.openai.com/v1` and `--whisper-api-key $OPENAI_API_KEY`.
+
+The Whisper response shape is normalized: top-level `words[]` (OpenAI) and nested `segments[].words[]` (Lemonade) are both accepted.
+
+## Output format
+
+| Format | Default | Layout |
+|---|---|---|
+| `tstxt` | yes | `[HH:MM:SS] [SPEAKER_NN]: text` |
+| `wxtxt` | | `[SPEAKER_NN]: text` (WhisperX byte-for-byte) |
+| `json` | | `[{start, end, speaker, text}, ...]` |
+
+## Performance
+
+Indicative timing on Matthew's workstation against Lemonade-on-halo with `Whisper-Large-v3-Turbo`:
+
+| Input length | End-to-end |
+|---|---|
+| 30 s | 3 s |
+| 5 min | 15 s |
+
+Whisper time is dominated by network + backend; diarization runs CPU-locally.
+
+## Why this exists
+
+Replaces a `~/bin/transcribe` shell script that ssh's into a remote CUDA box to run WhisperX. The new tool keeps everything on the local workstation, removes the PyTorch+CUDA dependency, runs offline-first, and produces output that drops directly into the existing OSG session-notes pipeline.
+
+## License
+
+MIT.

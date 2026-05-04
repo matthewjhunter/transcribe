@@ -2,7 +2,7 @@ module github.com/matthewjhunter/transcribe
 
 go 1.25.0
 
-toolchain go1.25.7
+toolchain go1.26.2
 
 require (
 	github.com/go-audio/audio v1.0.0
