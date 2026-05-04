@@ -8,6 +8,7 @@ require (
 	github.com/go-audio/audio v1.0.0
 	github.com/go-audio/wav v1.1.0
 	github.com/k2-fsa/sherpa-onnx-go v1.13.0
+	golang.org/x/sync v0.20.0
 )
 
 require (
