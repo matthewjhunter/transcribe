@@ -10,9 +10,19 @@ tasks:
       - task --list
 
   build:
-    desc: Build the binary
+    desc: Build the binary in the working directory
     cmds:
       - go build -o {{.BINARY}} ./cmd/{{.BINARY}}
+
+  install:
+    desc: Install the binary to $GOBIN (or $GOPATH/bin); requires CGO + ffmpeg on PATH at runtime
+    cmds:
+      - go install ./cmd/{{.BINARY}}
+
+  run:
+    desc: 'Build and run; pass args after --. Example: task run -- --num-speakers 4 file.mkv'
+    cmds:
+      - go run ./cmd/{{.BINARY}} {{.CLI_ARGS}}
 
   test:
     desc: Run tests with race detector
