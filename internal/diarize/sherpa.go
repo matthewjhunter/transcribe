@@ -37,9 +37,24 @@ type Config struct {
 	// voices. Sherpa default is 0.5.
 	Threshold float32
 
+	// MinDurationOn drops speech segments shorter than this many seconds
+	// from the pyannote VAD/segmenter. A small positive value (e.g. 0.5)
+	// suppresses sub-second blips that often spawn spurious clusters.
+	// Zero leaves the sherpa default in place.
+	MinDurationOn float32
+
+	// MinDurationOff merges adjacent speech segments separated by less
+	// than this many seconds of silence. Larger values produce longer,
+	// fewer turns. Zero leaves the sherpa default in place.
+	MinDurationOff float32
+
 	// NumThreads is the threadpool size for sherpa's segmentation and
 	// embedding stages. Zero defaults to runtime.NumCPU().
 	NumThreads int
+
+	// Provider selects the ONNX execution provider for both stages
+	// ("cpu", "cuda", etc.). Empty leaves the sherpa default ("cpu").
+	Provider string
 
 	// Debug enables sherpa's debug logging when non-zero.
 	Debug bool
@@ -85,16 +100,20 @@ func New(cfg Config) (*Diarizer, error) {
 			Pyannote:   sherpa.OfflineSpeakerSegmentationPyannoteModelConfig{Model: cfg.SegmentationModel},
 			NumThreads: threads,
 			Debug:      debug,
+			Provider:   cfg.Provider,
 		},
 		Embedding: sherpa.SpeakerEmbeddingExtractorConfig{
 			Model:      cfg.EmbeddingModel,
 			NumThreads: threads,
 			Debug:      debug,
+			Provider:   cfg.Provider,
 		},
 		Clustering: sherpa.FastClusteringConfig{
 			NumClusters: cfg.NumSpeakers,
 			Threshold:   threshold,
 		},
+		MinDurationOn:  cfg.MinDurationOn,
+		MinDurationOff: cfg.MinDurationOff,
 	}
 
 	impl := sherpa.NewOfflineSpeakerDiarization(sc)

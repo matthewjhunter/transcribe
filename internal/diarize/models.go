@@ -13,21 +13,59 @@ import (
 	"strings"
 )
 
-// Default model file names within the cache directory.
 const (
 	DefaultSegmentationFile = "sherpa-onnx-pyannote-segmentation-3-0.onnx"
-	DefaultEmbeddingFile    = "nemo_en_titanet_small.onnx"
 
 	segmentationURL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/" +
 		"speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
-	embeddingURL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/" +
-		"speaker-recongition-models/nemo_en_titanet_small.onnx"
 
-	// segmentationInnerName is the path of the model.onnx file inside
-	// the upstream tarball. It lives under a directory named after the
-	// release; we look for any "*/model.onnx" entry.
+	// segmentationInnerSuffix is the path of the model.onnx file
+	// inside the upstream tarball. It lives under a directory named
+	// after the release; we look for any "*/model.onnx" entry.
 	segmentationInnerSuffix = "/model.onnx"
 )
+
+// EmbeddingPreset names a speaker-embedding model from the sherpa-onnx
+// model zoo. Add entries to embeddingPresets to support more.
+type EmbeddingPreset string
+
+const (
+	// EmbeddingTitanetSmall is the default — ~22 MB, fast, decent
+	// English discrimination.
+	EmbeddingTitanetSmall EmbeddingPreset = "titanet_small"
+
+	// EmbeddingTitanetLarge is the larger NeMo TitaNet — ~95 MB, more
+	// discriminative; reduces over-clustering on noisy conversational
+	// audio at the cost of a slower diarization stage.
+	EmbeddingTitanetLarge EmbeddingPreset = "titanet_large"
+
+	DefaultEmbeddingPreset = EmbeddingTitanetSmall
+)
+
+type embeddingDescriptor struct {
+	Filename string
+	URL      string
+}
+
+// Note the upstream release tag has a typo: "speaker-recongition-models".
+var embeddingPresets = map[EmbeddingPreset]embeddingDescriptor{
+	EmbeddingTitanetSmall: {
+		Filename: "nemo_en_titanet_small.onnx",
+		URL: "https://github.com/k2-fsa/sherpa-onnx/releases/download/" +
+			"speaker-recongition-models/nemo_en_titanet_small.onnx",
+	},
+	EmbeddingTitanetLarge: {
+		Filename: "nemo_en_titanet_large.onnx",
+		URL: "https://github.com/k2-fsa/sherpa-onnx/releases/download/" +
+			"speaker-recongition-models/nemo_en_titanet_large.onnx",
+	},
+}
+
+// EmbeddingPresets returns the names of the known embedding presets in
+// a stable order; useful for usage strings.
+func EmbeddingPresets() []EmbeddingPreset {
+	return []EmbeddingPreset{EmbeddingTitanetSmall, EmbeddingTitanetLarge}
+}
 
 // CacheDir returns the directory where transcribe stores its model
 // files: $XDG_CACHE_HOME/transcribe/models, or $HOME/.cache/transcribe/models.
@@ -39,16 +77,27 @@ func CacheDir() (string, error) {
 	return filepath.Join(root, "transcribe", "models"), nil
 }
 
-// EnsureModels makes sure both default model files exist in CacheDir,
+// EnsureModels makes sure both required model files exist in CacheDir,
 // downloading them from the sherpa-onnx GitHub releases when they're
 // missing. Returns the absolute paths of the segmentation and embedding
 // files in that order.
+//
+// preset selects which speaker-embedding model to fetch; see
+// EmbeddingPresets. Pass "" to use DefaultEmbeddingPreset.
 //
 // Authenticity is not verified — these are the canonical sherpa-onnx
 // release artifacts and we trust GitHub's TLS as the integrity boundary.
 // If you don't trust that, supply your own paths via Config and skip
 // EnsureModels.
-func EnsureModels(ctx context.Context) (segPath, embPath string, err error) {
+func EnsureModels(ctx context.Context, preset EmbeddingPreset) (segPath, embPath string, err error) {
+	if preset == "" {
+		preset = DefaultEmbeddingPreset
+	}
+	desc, ok := embeddingPresets[preset]
+	if !ok {
+		return "", "", fmt.Errorf("diarize: unknown embedding preset %q", preset)
+	}
+
 	dir, err := CacheDir()
 	if err != nil {
 		return "", "", err
@@ -62,8 +111,8 @@ func EnsureModels(ctx context.Context) (segPath, embPath string, err error) {
 		return "", "", err
 	}
 
-	embPath = filepath.Join(dir, DefaultEmbeddingFile)
-	if err := ensureFile(ctx, embPath, embeddingURL); err != nil {
+	embPath = filepath.Join(dir, desc.Filename)
+	if err := ensureFile(ctx, embPath, desc.URL); err != nil {
 		return "", "", err
 	}
 

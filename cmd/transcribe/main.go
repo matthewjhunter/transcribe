@@ -50,6 +50,11 @@ type config struct {
 	targetSpeakers   int
 	speakerTolerance int
 	threshold        float64
+	minSpeechDur     float64
+	minSilenceDur    float64
+	diarizeThreads   int
+	diarizeProvider  string
+	embeddingPreset  string
 	segmentationOnnx string
 	embeddingOnnx    string
 
@@ -105,8 +110,14 @@ func parseFlags(args []string) (config, error) {
 	fs.IntVar(&cfg.targetSpeakers, "target-speakers", 4, "Soft target speaker count when --num-speakers=0. 0 disables.")
 	fs.IntVar(&cfg.speakerTolerance, "speaker-tolerance", 2, "Allow up to target+tolerance distinct speakers; merge the rest.")
 	fs.Float64Var(&cfg.threshold, "speaker-threshold", 0.5, "Clustering threshold when --num-speakers=0.")
+	fs.Float64Var(&cfg.minSpeechDur, "min-speech-duration", 0, "Drop speech segments shorter than N seconds. 0 = sherpa default.")
+	fs.Float64Var(&cfg.minSilenceDur, "min-silence-duration", 0, "Merge speech segments separated by < N seconds of silence. 0 = sherpa default.")
+	fs.IntVar(&cfg.diarizeThreads, "diarize-threads", 0, "Threads for sherpa segmentation/embedding stages. 0 = NumCPU.")
+	fs.StringVar(&cfg.diarizeProvider, "diarize-provider", "", "ONNX execution provider for diarization (cpu|cuda|...). Empty = cpu.")
+	fs.StringVar(&cfg.embeddingPreset, "embedding-preset", string(diarize.DefaultEmbeddingPreset),
+		"Speaker-embedding preset: "+joinPresets()+". Ignored when --embedding-model is set.")
 	fs.StringVar(&cfg.segmentationOnnx, "segmentation-model", "", "Path to pyannote segmentation ONNX. Empty = auto-cache.")
-	fs.StringVar(&cfg.embeddingOnnx, "embedding-model", "", "Path to speaker-embedding ONNX. Empty = auto-cache.")
+	fs.StringVar(&cfg.embeddingOnnx, "embedding-model", "", "Path to speaker-embedding ONNX. Empty = auto-cache (see --embedding-preset).")
 	fs.BoolVar(&cfg.keepTemp, "keep-temp", false, "Don't delete the extracted WAV.")
 	fs.BoolVar(&cfg.verbose, "verbose", false, "Debug logging.")
 	fs.BoolVar(&showVer, "version", false, "Print version and exit.")
@@ -183,6 +194,10 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 			EmbeddingModel:    embPath,
 			NumSpeakers:       cfg.numSpeakers,
 			Threshold:         float32(cfg.threshold),
+			MinDurationOn:     float32(cfg.minSpeechDur),
+			MinDurationOff:    float32(cfg.minSilenceDur),
+			NumThreads:        cfg.diarizeThreads,
+			Provider:          cfg.diarizeProvider,
 			Debug:             cfg.verbose,
 		})
 		if err != nil {
@@ -262,8 +277,9 @@ func resolveModelPaths(ctx context.Context, log *slog.Logger, cfg config) (strin
 	if cfg.segmentationOnnx != "" && cfg.embeddingOnnx != "" {
 		return cfg.segmentationOnnx, cfg.embeddingOnnx, nil
 	}
-	log.Info("ensuring diarization models in cache")
-	seg, emb, err := diarize.EnsureModels(ctx)
+	preset := diarize.EmbeddingPreset(cfg.embeddingPreset)
+	log.Info("ensuring diarization models in cache", "embedding_preset", preset)
+	seg, emb, err := diarize.EnsureModels(ctx, preset)
 	if err != nil {
 		return "", "", fmt.Errorf("ensure models: %w", err)
 	}
@@ -274,6 +290,15 @@ func resolveModelPaths(ctx context.Context, log *slog.Logger, cfg config) (strin
 		emb = cfg.embeddingOnnx
 	}
 	return seg, emb, nil
+}
+
+func joinPresets() string {
+	names := diarize.EmbeddingPresets()
+	parts := make([]string, len(names))
+	for i, n := range names {
+		parts[i] = string(n)
+	}
+	return strings.Join(parts, " | ")
 }
 
 func buildLines(log *slog.Logger, result *whisper.Result, turns []diarize.Turn, noDiarize bool) []align.SpeakerLine {

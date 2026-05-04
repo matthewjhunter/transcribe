@@ -57,22 +57,34 @@ Override either with `--segmentation-model` / `--embedding-model` to use differe
 
 Sherpa-onnx's default threshold-based clustering over-segments real-world conversational audio — a session with 4 actual people can produce 20+ "speakers" because the embedder distinguishes voice within the same speaker too aggressively when audio is noisy. To absorb that, the tool soft-targets a cluster count and folds low-duration "speakers" into their temporal neighbors after diarization.
 
-Defaults:
-
 | Flag | Default | Meaning |
 |---|---|---|
 | `--num-speakers` | 0 | Force exactly N. 0 = soft target. |
 | `--target-speakers` | 4 | Aim for ~N distinct speakers. 0 disables the post-merge. |
-| `--speaker-tolerance` | 2 | Allow up to `target+tolerance` distinct speakers. Anything past that cap gets merged. |
-| `--speaker-threshold` | 0.5 | Sherpa clustering threshold (only used when `--num-speakers=0`). |
+| `--speaker-tolerance` | 2 | Allow up to `target+tolerance` distinct speakers. The rest get merged. |
 
 Tuning:
 
-- **Different group size?** `transcribe --target-speakers 6 session.mkv` (or any other count).
-- **Need exact N speakers?** `transcribe --num-speakers 4 session.mkv` — bypasses soft-merge entirely.
+- **Different group size?** `transcribe --target-speakers 6 session.mkv`.
+- **Need exact N speakers?** `transcribe --num-speakers 4 session.mkv` — bypasses soft-merge.
 - **Want the raw clustering output?** `transcribe --target-speakers 0 session.mkv`.
 
 The per-run log shows the merge: `diarization complete turns=75 raw_speakers=28` followed by `merged sparse speakers before=28 after=6`.
+
+## Sherpa knobs
+
+All sherpa-onnx diarization parameters are exposed for experimentation without rebuilding. None of them produced a dramatic improvement on conversational audio in our testing — the soft-target merge above is doing the heavy lifting — but they're available if you want to dig in.
+
+| Flag | Default | Maps to |
+|---|---|---|
+| `--speaker-threshold` | 0.5 | `FastClusteringConfig.Threshold` (only used when `--num-speakers=0`). Lower → more clusters; higher → fewer. |
+| `--min-speech-duration` | 0 | `OfflineSpeakerDiarizationConfig.MinDurationOn` (seconds). Drops short voice-activity segments at the segmenter. |
+| `--min-silence-duration` | 0 | `OfflineSpeakerDiarizationConfig.MinDurationOff` (seconds). Merges adjacent speech across short silences. |
+| `--diarize-threads` | 0 (NumCPU) | Threadpool size for sherpa's segmentation and embedding stages. |
+| `--diarize-provider` | `""` (cpu) | ONNX execution provider (`cpu`, `cuda`, ...). |
+| `--embedding-preset` | `titanet_small` | Selects the embedding ONNX. `titanet_small` (~22 MB) or `titanet_large` (~95 MB, ~3× slower, no measurable quality win on conversational audio in our tests). |
+| `--segmentation-model` | auto-cache | Path to pyannote segmentation ONNX. |
+| `--embedding-model` | auto-cache | Path to speaker-embedding ONNX. Bypasses `--embedding-preset` when set. |
 
 ## Backends
 
