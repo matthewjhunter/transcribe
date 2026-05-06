@@ -20,10 +20,15 @@ import (
 )
 
 // SpeakerLine is one contiguous run of text attributed to a single speaker.
+//
+// Label is an optional voice-characterization tag (e.g. "M", "F", "?")
+// the renderer can attach to the speaker. Empty string means no label
+// should be shown.
 type SpeakerLine struct {
 	Start   time.Duration
 	End     time.Duration
 	Speaker int
+	Label   string
 	Text    string
 }
 

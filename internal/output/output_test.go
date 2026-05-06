@@ -71,6 +71,65 @@ func TestRender_UnknownFormatRejected(t *testing.T) {
 	}
 }
 
+var labeledFixture = []align.SpeakerLine{
+	{Start: 0 * time.Second, End: 2 * time.Second, Speaker: 0, Label: "M", Text: "Hello there."},
+	{Start: 2 * time.Second, End: 4 * time.Second, Speaker: 1, Label: "F", Text: "General Kenobi."},
+	{Start: 4 * time.Second, End: 6 * time.Second, Speaker: 2, Label: "?", Text: "Mystery voice."},
+}
+
+func TestRender_TimestampedWithLabels(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Render(labeledFixture, &buf, FormatTimestampedTXT); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	want := "[00:00:00] [SPEAKER_00 (M)]: Hello there.\n" +
+		"[00:00:02] [SPEAKER_01 (F)]: General Kenobi.\n" +
+		"[00:00:04] [SPEAKER_02 (?)]: Mystery voice.\n"
+	if got := buf.String(); got != want {
+		t.Errorf("labeled tstxt mismatch:\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+func TestRender_WhisperXIgnoresLabels(t *testing.T) {
+	// wxtxt is mandated to be byte-for-byte WhisperX-compatible; labels
+	// must never leak into it even when present on the SpeakerLine.
+	var buf bytes.Buffer
+	if err := Render(labeledFixture, &buf, FormatWhisperXTXT); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	want := "[SPEAKER_00]: Hello there.\n" +
+		"[SPEAKER_01]: General Kenobi.\n" +
+		"[SPEAKER_02]: Mystery voice.\n"
+	if got := buf.String(); got != want {
+		t.Errorf("wxtxt label leakage:\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+func TestRender_JSONIncludesLabel(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Render(labeledFixture, &buf, FormatJSON); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	var got []jsonLine
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("decode JSON: %v", err)
+	}
+	if got[0].Label != "M" || got[1].Label != "F" || got[2].Label != "?" {
+		t.Errorf("labels: got %q/%q/%q, want M/F/?", got[0].Label, got[1].Label, got[2].Label)
+	}
+}
+
+func TestRender_JSONOmitsEmptyLabel(t *testing.T) {
+	// label,omitempty: lines with no label should not include the field.
+	var buf bytes.Buffer
+	if err := Render(fixture, &buf, FormatJSON); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if bytes.Contains(buf.Bytes(), []byte(`"label"`)) {
+		t.Errorf("expected no \"label\" key for unlabeled fixture, got: %s", buf.String())
+	}
+}
+
 func TestRender_EmptyInput(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Render(nil, &buf, FormatTimestampedTXT); err != nil {

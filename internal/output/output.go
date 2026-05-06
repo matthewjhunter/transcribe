@@ -47,14 +47,21 @@ func Render(lines []align.SpeakerLine, w io.Writer, f Format) error {
 func renderTimestamped(lines []align.SpeakerLine, w io.Writer) error {
 	for _, l := range lines {
 		h, m, s := splitHMS(l.Start)
-		if _, err := fmt.Fprintf(w, "[%02d:%02d:%02d] [SPEAKER_%02d]: %s\n",
-			h, m, s, l.Speaker, l.Text); err != nil {
+		speaker := fmt.Sprintf("SPEAKER_%02d", l.Speaker)
+		if l.Label != "" {
+			speaker = fmt.Sprintf("SPEAKER_%02d (%s)", l.Speaker, l.Label)
+		}
+		if _, err := fmt.Fprintf(w, "[%02d:%02d:%02d] [%s]: %s\n",
+			h, m, s, speaker, l.Text); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// renderWhisperX intentionally ignores SpeakerLine.Label. The wxtxt
+// format is mandated to be byte-for-byte compatible with WhisperX
+// `--output_format txt --diarize`, which has no label slot.
 func renderWhisperX(lines []align.SpeakerLine, w io.Writer) error {
 	for _, l := range lines {
 		if _, err := fmt.Fprintf(w, "[SPEAKER_%02d]: %s\n", l.Speaker, l.Text); err != nil {
@@ -68,6 +75,7 @@ type jsonLine struct {
 	Start   float64 `json:"start"`
 	End     float64 `json:"end"`
 	Speaker int     `json:"speaker"`
+	Label   string  `json:"label,omitempty"`
 	Text    string  `json:"text"`
 }
 
@@ -78,6 +86,7 @@ func renderJSON(lines []align.SpeakerLine, w io.Writer) error {
 			Start:   l.Start.Seconds(),
 			End:     l.End.Seconds(),
 			Speaker: l.Speaker,
+			Label:   l.Label,
 			Text:    l.Text,
 		}
 	}
