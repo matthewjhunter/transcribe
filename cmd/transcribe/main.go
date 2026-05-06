@@ -54,6 +54,8 @@ type config struct {
 	vadMinChunk   float64
 	vadModel      string
 
+	noExtractAudio bool
+
 	noDiarize        bool
 	numSpeakers      int
 	minSpeechDur     float64
@@ -117,6 +119,7 @@ func parseFlags(args []string) (config, error) {
 	fs.Float64Var(&cfg.vadMaxChunk, "vad-max-chunk", 28, "Hard cap on chunk length sent to the backend, in seconds.")
 	fs.Float64Var(&cfg.vadMinChunk, "vad-min-chunk", 1, "Drop chunks shorter than N seconds after merging.")
 	fs.StringVar(&cfg.vadModel, "vad-model", "", "Path to silero_vad.onnx. Empty = auto-cache.")
+	fs.BoolVar(&cfg.noExtractAudio, "no-extract-audio", false, "Don't write a sibling lossless audio-stream copy next to the transcript.")
 	fs.BoolVar(&cfg.noDiarize, "no-diarize", false, "Skip speaker diarization; emit one line per segment.")
 	fs.IntVar(&cfg.numSpeakers, "num-speakers", 0, "Required (unless --no-diarize). Number of distinct speakers in the recording.")
 	fs.Float64Var(&cfg.minSpeechDur, "min-speech-duration", 0, "Drop speech segments shorter than N seconds. 0 = sherpa default.")
@@ -179,7 +182,13 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 	if !probe.HasAudio {
 		return fmt.Errorf("input %q has no audio stream", cfg.input)
 	}
-	log.Info("probed input", "duration", probe.Duration, "has_video", probe.HasVideo)
+	log.Info("probed input", "duration", probe.Duration, "has_video", probe.HasVideo, "audio_codec", probe.AudioCodec)
+
+	if !cfg.noExtractAudio && probe.HasVideo {
+		if err := extractAudioSibling(ctx, log, cfg, probe); err != nil {
+			return err
+		}
+	}
 
 	tmpDir, err := os.MkdirTemp("", "transcribe-")
 	if err != nil {
@@ -292,6 +301,47 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 		return fmt.Errorf("render: %w", err)
 	}
 	return nil
+}
+
+// extractAudioSibling writes a lossless stream-copy of the input's
+// audio next to wherever the transcript will land. Skips silently when
+// the destination already exists (idempotent re-runs) or when the
+// destination resolves to nothing useful (stdout output).
+func extractAudioSibling(ctx context.Context, log *slog.Logger, cfg config, probe audio.Probe) error {
+	dst := siblingAudioPath(cfg, probe.AudioCodec)
+	if dst == "" {
+		return nil
+	}
+	if _, err := os.Stat(dst); err == nil {
+		log.Info("audio sibling already exists; skipping", "path", dst)
+		return nil
+	}
+	log.Info("extracting audio stream", "out", dst, "codec", probe.AudioCodec)
+	if err := audio.ExtractAudioStream(ctx, cfg.input, dst); err != nil {
+		return fmt.Errorf("extract audio stream: %w", err)
+	}
+	return nil
+}
+
+// siblingAudioPath derives the lossless-audio sibling file path from
+// the transcript path that openOutput would pick: the same directory,
+// the same basename, with a codec-derived extension. Returns "" when
+// no path makes sense (stdout output, missing codec, or no input).
+func siblingAudioPath(cfg config, codec string) string {
+	if codec == "" || cfg.outputPath == "-" {
+		return ""
+	}
+	ext := audio.AudioStreamExt(codec)
+	base := cfg.outputPath
+	if base == "" {
+		base = strings.TrimSuffix(cfg.input, filepath.Ext(cfg.input))
+	} else {
+		base = strings.TrimSuffix(base, filepath.Ext(base))
+	}
+	if base == "" {
+		return ""
+	}
+	return base + "." + ext
 }
 
 func planVADChunks(ctx context.Context, log *slog.Logger, cfg config, samples []float32, sampleRate int) ([]vad.Chunk, error) {
