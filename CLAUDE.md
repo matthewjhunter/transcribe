@@ -11,13 +11,26 @@ Replace the existing `~/bin/transcribe` shell script (which shells out to Whispe
 ```
 input file
    │
-   ├─ ffprobe: video? → ffmpeg extract WAV (16 kHz mono PCM)
+   ├─ ffprobe → ffmpeg
+   │     │
+   │     ├─ video? stream-copy audio to sibling <input>.m4a/.opus/...
+   │     │       (lossless, codec→container map; --no-extract-audio to skip)
+   │     └─ extract canonical WAV (16 kHz mono PCM) into temp dir
+   │
+   ├─ Silero VAD (sherpa-onnx, in-process)
+   │     → speech regions → chunk plan
+   │       (greedy-merge gap < 0.5s, hard-cap 28s, drop < 1s)
+   │       --no-vad falls back to whole-file submission
    │
    ├─ Whisper backend (Lemonade /v1/audio/transcriptions)
+   │     one POST per VAD chunk, fresh decoder state per chunk,
+   │     bounded concurrency (--whisper-concurrency)
    │     → segments + word-level timestamps (verbose_json)
+   │     → offset to global time, merged in chunk order
    │
-   ├─ sherpa-onnx offline speaker diarization
+   ├─ sherpa-onnx offline speaker diarization (parallel with Whisper)
    │     pyannote-segmentation-3.0 ONNX + 3D-Speaker embedding ONNX
+   │     runs on the whole file, not per chunk
    │     → list of (start, end, speaker_id) segments
    │
    └─ aligner: assign each Whisper word/segment to the speaker whose
@@ -26,6 +39,12 @@ input file
               `internal/output` package (formats: `tstxt` default, `wxtxt`,
               `json`)
 ```
+
+VAD is on by default because Whisper-Large-v3 hallucinates on long-form
+conversational input — its `condition_on_previous_text` decoder bias can
+latch onto a phrase and emit it for tens of minutes straight. Per-chunk
+submission resets decoder state at every silence gap, bounding the
+blast radius of any single hallucination loop to one chunk.
 
 ## Backend choice
 
@@ -39,7 +58,7 @@ This means the same binary works against:
 - **whisper.cpp server** anywhere (`./server` mode)
 - **OpenAI Whisper API** (just point the URL at `https://api.openai.com/v1` with a key)
 
-Sherpa-onnx runs in-process via Go bindings (`github.com/k2-fsa/sherpa-onnx-go`). Models are downloaded on first run to `${XDG_CACHE_HOME:-$HOME/.cache}/transcribe/models/`.
+Sherpa-onnx runs in-process via Go bindings (`github.com/k2-fsa/sherpa-onnx-go`) for both VAD and diarization. Three ONNX model files are downloaded on first run to `${XDG_CACHE_HOME:-$HOME/.cache}/transcribe/models/`: `silero_vad.onnx`, `sherpa-onnx-pyannote-segmentation-3-0.onnx`, and the configured speaker-embedding model (`nemo_en_titanet_large.onnx` by default).
 
 ## Non-goals (v0.1)
 
@@ -59,8 +78,9 @@ The `.txt` is read by humans and LLM agents (e.g. the OSG `osg-session-notes` sk
 ## Deferred / open questions
 
 - Whether to enable Lemonade's NPU recipe is a server-side config decision, not a client one — out of scope here.
-- VAD: WhisperX uses Silero VAD before transcription. Lemonade's whispercpp does its own internal VAD. For v0.1 we trust the backend; revisit if accuracy regresses.
 - Word timestamps: required for alignment. Lemonade `whispercpp` returns segment + word timestamps with `response_format=verbose_json` — need to confirm and handle if any field is missing.
+- VAD chunk overlap + dedup: chunks are currently cut at silences with no overlap, on the assumption that VAD boundaries don't bisect words. Add an overlap window with word-level dedup if real output shows boundary artifacts.
+- Back-channel preservation: short utterances (e.g. "yeah", "right") with > 0.5 s of silence on either side are below the merge threshold and below `--vad-min-chunk`, so they're dropped from the transcript. Diarization still attributes the time region to a speaker, but the line disappears. Lower thresholds rescue them at the cost of more requests and a higher loop-hallucination surface area.
 
 ## Build
 
@@ -89,6 +109,6 @@ Unit tests for the aligner and the Whisper-response parser should not require ex
 
 ## Related work
 
-- `~/bin/transcribe.old` — the retired bash script this replaces (renamed from `~/bin/transcribe`; kept for reference, no longer on PATH).
+- `~/bin/transcribe.old` and `~/bin/extract-audio` — the retired bash scripts this replaces (renamed from `~/bin/transcribe`; kept for reference, no longer on PATH). The lossless audio-stream sibling output preserves the side effect of the old `extract-audio` helper.
 - `~/.local/share/whisperx/` — the Python WhisperX install on rainbow and halo. Reference for output format. Sample output: `~/Shadowmaze 2026-02-09.txt`.
 - `github.com/matthewjhunter/asrclient` — sibling Go module abstracting ASR backends for `dicta`. If a Whisper-HTTP backend lands there first, this tool should consume it rather than reimplementing.
