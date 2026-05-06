@@ -108,11 +108,16 @@ func (c *Client) Transcribe(ctx context.Context, wavPath string) (*Result, error
 		return nil, fmt.Errorf("whisper: open %q: %w", wavPath, err)
 	}
 	defer f.Close()
+	return c.transcribeBody(ctx, f, filepath.Base(wavPath))
+}
 
+// transcribeBody is the shared implementation used by both Transcribe
+// (file body) and TranscribeChunks (per-chunk in-memory WAV body).
+func (c *Client) transcribeBody(ctx context.Context, body io.Reader, name string) (*Result, error) {
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
 
-	go c.writeMultipart(pw, mw, f, filepath.Base(wavPath))
+	go c.writeMultipart(pw, mw, body, name)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, pr)
 	if err != nil {
@@ -131,20 +136,20 @@ func (c *Client) Transcribe(ctx context.Context, wavPath string) (*Result, error
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-		return nil, fmt.Errorf("whisper: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		return nil, fmt.Errorf("whisper: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return nil, fmt.Errorf("whisper: read response: %w", err)
 	}
-	return parseResponse(body)
+	return parseResponse(respBody)
 }
 
 // writeMultipart runs in a goroutine, writing the upload body into the
 // pipe. It always closes the writer side so the request body terminates.
-func (c *Client) writeMultipart(pw *io.PipeWriter, mw *multipart.Writer, f *os.File, name string) {
+func (c *Client) writeMultipart(pw *io.PipeWriter, mw *multipart.Writer, body io.Reader, name string) {
 	var werr error
 	defer func() {
 		if cerr := mw.Close(); werr == nil && cerr != nil {
@@ -175,7 +180,7 @@ func (c *Client) writeMultipart(pw *io.PipeWriter, mw *multipart.Writer, f *os.F
 		werr = err
 		return
 	}
-	if _, err := io.Copy(fw, f); err != nil {
+	if _, err := io.Copy(fw, body); err != nil {
 		werr = err
 		return
 	}
