@@ -33,11 +33,16 @@ input file
    │     runs on the whole file, not per chunk
    │     → list of (start, end, speaker_id) segments
    │
+   ├─ voice labeling (pure DSP, no model)
+   │     YIN F0 estimation per cluster → median F0 → M / F / ?
+   │     thresholds: < 155 Hz → M, > 180 Hz → F, in-between → ?
+   │     --no-label-gender to skip
+   │
    └─ aligner: assign each Whisper word/segment to the speaker whose
               diarization segment overlaps it most (majority vote per
-              transcript segment), emit speaker-labeled lines via the
-              `internal/output` package (formats: `tstxt` default, `wxtxt`,
-              `json`)
+              transcript segment), stamp each line with the cluster's
+              voice label, emit via the `internal/output` package
+              (formats: `tstxt` default, `wxtxt`, `json`)
 ```
 
 VAD is on by default because Whisper-Large-v3 hallucinates on long-form
@@ -45,6 +50,14 @@ conversational input — its `condition_on_previous_text` decoder bias can
 latch onto a phrase and emit it for tens of minutes straight. Per-chunk
 submission resets decoder state at every silence gap, bounding the
 blast radius of any single hallucination loop to one chunk.
+
+Voice labeling is on by default because diarization clusters are
+anonymous — `SPEAKER_00` carries no identity beyond "consistent voice."
+Tagging each cluster M/F/? halves the search space when manually mapping
+clusters to known players. F0 from a YIN estimator is enough for two-class
+on adult voices (~92–96% on clean conversational audio); no ML model,
+no Python sidecar, no extra dependency. The `wxtxt` format intentionally
+strips the label to preserve byte-for-byte WhisperX compatibility.
 
 ## Backend choice
 
@@ -71,9 +84,9 @@ Sherpa-onnx runs in-process via Go bindings (`github.com/k2-fsa/sherpa-onnx-go`)
 
 The `.txt` is read by humans and LLM agents (e.g. the OSG `osg-session-notes` skill treats it as committed source material), not parsed by any tool — `grep -r SPEAKER_ ~/git/osg` returns no matches outside vendored code. So format choice is about reader ergonomics, not byte-level compatibility.
 
-- **`tstxt`** (default) — `[HH:MM:SS] [SPEAKER_NN]: text\n`. Recommended: timestamps let a human or LLM jump back to the source video for a specific moment in a multi-hour session.
-- **`wxtxt`** — `[SPEAKER_NN]: text\n`. Byte-for-byte match for WhisperX `--output_format txt --diarize` (verified against `~/Shadowmaze 2026-02-09.txt`). Note: the WhisperX TXT format has *no* timestamps — the `[time --> time]` form is SRT/VTT, not TXT. Keep `wxtxt` only if some specific consumer requires byte-identical output.
-- **`json`** — array of `{start, end, speaker, text}` for programmatic consumers.
+- **`tstxt`** (default) — `[HH:MM:SS] [SPEAKER_NN (X)]: text\n` when voice labeling is on, `[HH:MM:SS] [SPEAKER_NN]: text\n` when off. Recommended: timestamps let a human or LLM jump back to the source video for a specific moment in a multi-hour session; the `(M)`/`(F)`/`(?)` tag halves the candidate set when manually mapping clusters to players.
+- **`wxtxt`** — `[SPEAKER_NN]: text\n`. Byte-for-byte match for WhisperX `--output_format txt --diarize` (verified against `~/Shadowmaze 2026-02-09.txt`). Voice labels are intentionally dropped here — WhisperX has no slot for them. Note: the WhisperX TXT format has *no* timestamps — the `[time --> time]` form is SRT/VTT, not TXT. Keep `wxtxt` only if some specific consumer requires byte-identical output.
+- **`json`** — array of `{start, end, speaker, label?, text}` for programmatic consumers. The `label` field uses `omitempty`, so unlabeled output stays clean.
 
 ## Deferred / open questions
 
@@ -81,6 +94,7 @@ The `.txt` is read by humans and LLM agents (e.g. the OSG `osg-session-notes` sk
 - Word timestamps: required for alignment. Lemonade `whispercpp` returns segment + word timestamps with `response_format=verbose_json` — need to confirm and handle if any field is missing.
 - VAD chunk overlap + dedup: chunks are currently cut at silences with no overlap, on the assumption that VAD boundaries don't bisect words. Add an overlap window with word-level dedup if real output shows boundary artifacts.
 - Back-channel preservation: short utterances (e.g. "yeah", "right") with > 0.5 s of silence on either side are below the merge threshold and below `--vad-min-chunk`, so they're dropped from the transcript. Diarization still attributes the time region to a speaker, but the line disappears. Lower thresholds rescue them at the cost of more requests and a higher loop-hallucination surface area.
+- Voice labeling beyond binary M/F: F0 alone can cleanly separate adult M / adult F / child but says nothing useful about specific adult age. Adult-vs-child detection is straightforward to add (children have higher F0 and shorter vocal tracts) if it ever matters; specific-age estimation is a much harder problem we don't need.
 
 ## Build
 
