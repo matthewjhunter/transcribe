@@ -26,6 +26,7 @@ import (
 	"github.com/matthewjhunter/transcribe/internal/diarize"
 	"github.com/matthewjhunter/transcribe/internal/output"
 	"github.com/matthewjhunter/transcribe/internal/vad"
+	"github.com/matthewjhunter/transcribe/internal/voicelabel"
 	"github.com/matthewjhunter/transcribe/internal/whisper"
 )
 
@@ -55,6 +56,10 @@ type config struct {
 	vadModel      string
 
 	noExtractAudio bool
+
+	noLabelGender    bool
+	labelMaleMaxHz   float64
+	labelFemaleMinHz float64
 
 	noDiarize        bool
 	numSpeakers      int
@@ -120,6 +125,9 @@ func parseFlags(args []string) (config, error) {
 	fs.Float64Var(&cfg.vadMinChunk, "vad-min-chunk", 1, "Drop chunks shorter than N seconds after merging.")
 	fs.StringVar(&cfg.vadModel, "vad-model", "", "Path to silero_vad.onnx. Empty = auto-cache.")
 	fs.BoolVar(&cfg.noExtractAudio, "no-extract-audio", false, "Don't write a sibling lossless audio-stream copy next to the transcript.")
+	fs.BoolVar(&cfg.noLabelGender, "no-label-gender", false, "Don't tag each diarization cluster with an M/F/? voice label.")
+	fs.Float64Var(&cfg.labelMaleMaxHz, "label-male-max-hz", 155, "Median F0 strictly below this (Hz) labels the cluster M.")
+	fs.Float64Var(&cfg.labelFemaleMinHz, "label-female-min-hz", 180, "Median F0 strictly above this (Hz) labels the cluster F.")
 	fs.BoolVar(&cfg.noDiarize, "no-diarize", false, "Skip speaker diarization; emit one line per segment.")
 	fs.IntVar(&cfg.numSpeakers, "num-speakers", 0, "Required (unless --no-diarize). Number of distinct speakers in the recording.")
 	fs.Float64Var(&cfg.minSpeechDur, "min-speech-duration", 0, "Drop speech segments shorter than N seconds. 0 = sherpa default.")
@@ -292,6 +300,10 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 
 	lines := buildLines(log, result, turns, cfg.noDiarize)
 
+	if !cfg.noLabelGender && !cfg.noDiarize && len(turns) > 0 && len(samples) > 0 {
+		applyVoiceLabels(log, cfg, samples, sampleRate, turns, lines)
+	}
+
 	w, closeFn, err := openOutput(cfg)
 	if err != nil {
 		return err
@@ -301,6 +313,28 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 		return fmt.Errorf("render: %w", err)
 	}
 	return nil
+}
+
+// applyVoiceLabels classifies each diarization cluster by median F0
+// and stamps the resulting M/F/? label onto every SpeakerLine. The
+// classification is cheap (sub-second on a 90-min file) so we run it
+// inline rather than overlapping with another stage.
+func applyVoiceLabels(log *slog.Logger, cfg config, samples []float32, sampleRate int, turns []diarize.Turn, lines []align.SpeakerLine) {
+	stats := voicelabel.ClassifyClusters(samples, sampleRate, turns, voicelabel.ClassifyOptions{
+		MaleMaxHz:   cfg.labelMaleMaxHz,
+		FemaleMinHz: cfg.labelFemaleMinHz,
+	})
+	if len(stats) == 0 {
+		return
+	}
+	for speaker, s := range stats {
+		log.Info("voice label", "speaker", speaker, "label", s.Label, "median_f0_hz", s.MedianF0Hz, "voiced_frames", s.Frames)
+	}
+	for i := range lines {
+		if s, ok := stats[lines[i].Speaker]; ok {
+			lines[i].Label = string(s.Label)
+		}
+	}
 }
 
 // extractAudioSibling writes a lossless stream-copy of the input's
