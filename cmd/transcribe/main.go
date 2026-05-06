@@ -17,6 +17,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/matthewjhunter/transcribe/internal/audio"
 	"github.com/matthewjhunter/transcribe/internal/diarize"
 	"github.com/matthewjhunter/transcribe/internal/output"
+	"github.com/matthewjhunter/transcribe/internal/vad"
 	"github.com/matthewjhunter/transcribe/internal/whisper"
 )
 
@@ -40,10 +42,17 @@ type config struct {
 	outputPath   string
 	outputFormat output.Format
 
-	whisperURL    string
-	whisperModel  string
-	whisperAPIKey string
-	language      string
+	whisperURL         string
+	whisperModel       string
+	whisperAPIKey      string
+	whisperConcurrency int
+	language           string
+
+	noVAD         bool
+	vadMinSilence float64
+	vadMaxChunk   float64
+	vadMinChunk   float64
+	vadModel      string
 
 	noDiarize        bool
 	numSpeakers      int
@@ -101,7 +110,13 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&cfg.whisperURL, "whisper-url", whisper.DefaultEndpoint, "OpenAI-compatible /v1 base URL.")
 	fs.StringVar(&cfg.whisperModel, "whisper-model", whisper.DefaultModel, "Model name passed to the backend.")
 	fs.StringVar(&cfg.whisperAPIKey, "whisper-api-key", apiKeyDefault, "Bearer token; defaults to $WHISPER_API_KEY.")
+	fs.IntVar(&cfg.whisperConcurrency, "whisper-concurrency", 1, "Parallel transcription requests when VAD chunking is on.")
 	fs.StringVar(&cfg.language, "language", "en", "ISO-639-1 language hint. Empty for auto-detect.")
+	fs.BoolVar(&cfg.noVAD, "no-vad", false, "Disable VAD pre-chunking; submit the full file as one request.")
+	fs.Float64Var(&cfg.vadMinSilence, "vad-min-silence", 0.5, "Merge VAD speech regions separated by < N seconds of silence.")
+	fs.Float64Var(&cfg.vadMaxChunk, "vad-max-chunk", 28, "Hard cap on chunk length sent to the backend, in seconds.")
+	fs.Float64Var(&cfg.vadMinChunk, "vad-min-chunk", 1, "Drop chunks shorter than N seconds after merging.")
+	fs.StringVar(&cfg.vadModel, "vad-model", "", "Path to silero_vad.onnx. Empty = auto-cache.")
 	fs.BoolVar(&cfg.noDiarize, "no-diarize", false, "Skip speaker diarization; emit one line per segment.")
 	fs.IntVar(&cfg.numSpeakers, "num-speakers", 0, "Required (unless --no-diarize). Number of distinct speakers in the recording.")
 	fs.Float64Var(&cfg.minSpeechDur, "min-speech-duration", 0, "Drop speech segments shorter than N seconds. 0 = sherpa default.")
@@ -182,6 +197,19 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 		return fmt.Errorf("extract WAV: %w", err)
 	}
 
+	samples, sampleRate, err := audio.ReadFloat32(wavPath)
+	if err != nil {
+		return fmt.Errorf("read WAV: %w", err)
+	}
+
+	var chunks []vad.Chunk
+	if !cfg.noVAD {
+		chunks, err = planVADChunks(ctx, log, cfg, samples, sampleRate)
+		if err != nil {
+			return err
+		}
+	}
+
 	var diarizer *diarize.Diarizer
 	if !cfg.noDiarize {
 		segPath, embPath, err := resolveModelPaths(ctx, log, cfg)
@@ -218,8 +246,18 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		log.Info("transcribing", "url", cfg.whisperURL, "model", cfg.whisperModel)
-		r, err := wc.Transcribe(gctx, wavPath)
+		var (
+			r   *whisper.Result
+			err error
+		)
+		if cfg.noVAD {
+			log.Info("transcribing whole file", "url", cfg.whisperURL, "model", cfg.whisperModel)
+			r, err = wc.Transcribe(gctx, wavPath)
+		} else {
+			log.Info("transcribing chunks", "url", cfg.whisperURL, "model", cfg.whisperModel,
+				"chunks", len(chunks), "concurrency", cfg.whisperConcurrency)
+			r, err = wc.TranscribeChunks(gctx, samples, sampleRate, chunks, cfg.whisperConcurrency)
+		}
 		if err != nil {
 			return fmt.Errorf("whisper: %w", err)
 		}
@@ -230,11 +268,7 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 	if diarizer != nil {
 		g.Go(func() error {
 			log.Info("diarizing", "sample_rate", diarizer.SampleRate())
-			samples, sr, err := audio.ReadFloat32(wavPath)
-			if err != nil {
-				return fmt.Errorf("read WAV: %w", err)
-			}
-			t, err := diarizer.Process(samples, sr)
+			t, err := diarizer.Process(samples, sampleRate)
 			if err != nil {
 				return fmt.Errorf("diarize: %w", err)
 			}
@@ -258,6 +292,51 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 		return fmt.Errorf("render: %w", err)
 	}
 	return nil
+}
+
+func planVADChunks(ctx context.Context, log *slog.Logger, cfg config, samples []float32, sampleRate int) ([]vad.Chunk, error) {
+	modelPath := cfg.vadModel
+	if modelPath == "" {
+		log.Info("ensuring VAD model in cache")
+		p, err := vad.EnsureModel(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("ensure vad model: %w", err)
+		}
+		modelPath = p
+	}
+
+	maxChunk := time.Duration(cfg.vadMaxChunk * float64(time.Second))
+	det, err := vad.New(vad.Config{
+		Model:              modelPath,
+		SampleRate:         sampleRate,
+		MinSilenceDuration: float32(cfg.vadMinSilence),
+		MaxSpeechDuration:  float32(cfg.vadMaxChunk),
+		NumThreads:         cfg.diarizeThreads,
+		Provider:           cfg.diarizeProvider,
+		Debug:              cfg.verbose,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("init vad: %w", err)
+	}
+	defer det.Close()
+
+	log.Info("running VAD", "sample_rate", sampleRate)
+	segs, err := det.Detect(samples, sampleRate)
+	if err != nil {
+		return nil, fmt.Errorf("vad: %w", err)
+	}
+	chunks := vad.Plan(segs, vad.PlanOptions{
+		MinSilence: time.Duration(cfg.vadMinSilence * float64(time.Second)),
+		MaxChunk:   maxChunk,
+		MinChunk:   time.Duration(cfg.vadMinChunk * float64(time.Second)),
+	})
+	log.Info("vad plan complete", "raw_segments", len(segs), "chunks", len(chunks))
+	if log.Enabled(ctx, slog.LevelDebug) {
+		for i, ch := range chunks {
+			log.Debug("vad chunk", "i", i, "start", ch.Start, "end", ch.End, "span", ch.End-ch.Start)
+		}
+	}
+	return chunks, nil
 }
 
 func resolveModelPaths(ctx context.Context, log *slog.Logger, cfg config) (string, string, error) {
