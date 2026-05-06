@@ -22,8 +22,9 @@ input file
    │
    └─ aligner: assign each Whisper word/segment to the speaker whose
               diarization segment overlaps it most (majority vote per
-              transcript segment), emit `[HH:MM:SS.sss --> HH:MM:SS.sss]
-              (SPEAKER_NN) text` lines compatible with WhisperX `--output_format txt`
+              transcript segment), emit speaker-labeled lines via the
+              `internal/output` package (formats: `tstxt` default, `wxtxt`,
+              `json`)
 ```
 
 ## Backend choice
@@ -47,10 +48,17 @@ Sherpa-onnx runs in-process via Go bindings (`github.com/k2-fsa/sherpa-onnx-go`)
 - No GPU acceleration of the diarization stage; CPU sherpa-onnx is the target. Diarization is the bottleneck on Strix Halo CPU but acceptable.
 - No internal HTTP API or job queue — that's a separate service-shaped project (`asrclient`-style) that could later wrap this CLI.
 
+## Output formats
+
+The `.txt` is read by humans and LLM agents (e.g. the OSG `osg-session-notes` skill treats it as committed source material), not parsed by any tool — `grep -r SPEAKER_ ~/git/osg` returns no matches outside vendored code. So format choice is about reader ergonomics, not byte-level compatibility.
+
+- **`tstxt`** (default) — `[HH:MM:SS] [SPEAKER_NN]: text\n`. Recommended: timestamps let a human or LLM jump back to the source video for a specific moment in a multi-hour session.
+- **`wxtxt`** — `[SPEAKER_NN]: text\n`. Byte-for-byte match for WhisperX `--output_format txt --diarize` (verified against `~/Shadowmaze 2026-02-09.txt`). Note: the WhisperX TXT format has *no* timestamps — the `[time --> time]` form is SRT/VTT, not TXT. Keep `wxtxt` only if some specific consumer requires byte-identical output.
+- **`json`** — array of `{start, end, speaker, text}` for programmatic consumers.
+
 ## Deferred / open questions
 
 - Whether to enable Lemonade's NPU recipe is a server-side config decision, not a client one — out of scope here.
-- Output format parity with WhisperX: the current consumer (OSG) uses the `.txt` form, which is `[time --> time] (SPEAKER_NN) text` per line. Match that exactly.
 - VAD: WhisperX uses Silero VAD before transcription. Lemonade's whispercpp does its own internal VAD. For v0.1 we trust the backend; revisit if accuracy regresses.
 - Word timestamps: required for alignment. Lemonade `whispercpp` returns segment + word timestamps with `response_format=verbose_json` — need to confirm and handle if any field is missing.
 
@@ -77,10 +85,10 @@ Unit tests for the aligner and the Whisper-response parser should not require ex
 - Single-dash short flags, double-dash long flags (Matthew's preference).
 - Taskfile.yml is the build entrypoint, not Makefile.
 - `cmd/transcribe/main.go` stays thin — orchestration only. All real logic in `internal/`.
-- Match the existing WhisperX `.txt` output line format byte-for-byte where feasible so the OSG pipeline doesn't notice a backend swap.
+- The `wxtxt` format must remain byte-for-byte identical to WhisperX `--output_format txt --diarize` (i.e. `[SPEAKER_NN]: text\n`, no timestamps). Don't "fix" it by adding timestamps — that would silently break drop-in compatibility for any consumer that depends on the WhisperX line shape. Add new format constants instead.
 
 ## Related work
 
-- `~/bin/transcribe` — the bash script this replaces (still in use; don't remove until parity is proven).
-- `~/.local/share/whisperx/` — the Python WhisperX install on rainbow and halo. Reference for output format.
+- `~/bin/transcribe.old` — the retired bash script this replaces (renamed from `~/bin/transcribe`; kept for reference, no longer on PATH).
+- `~/.local/share/whisperx/` — the Python WhisperX install on rainbow and halo. Reference for output format. Sample output: `~/Shadowmaze 2026-02-09.txt`.
 - `github.com/matthewjhunter/asrclient` — sibling Go module abstracting ASR backends for `dicta`. If a Whisper-HTTP backend lands there first, this tool should consume it rather than reimplementing.
