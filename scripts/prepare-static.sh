@@ -39,11 +39,15 @@ FORK_DIR="$BUILD_DIR/sherpa-onnx-go-linux-static"
 LIB_SUBDIR="lib/x86_64-unknown-linux-gnu"
 mkdir -p "$BUILD_DIR"
 
-# 1. Fetch and verify the static-lib release archive.
+# 1. Fetch and verify the static-lib release archive. Download to a temp
+#    name and rename only after the checksum passes, so a partial or
+#    tampered file never sits at the verified path.
 if ! echo "$SHERPA_SHA256  $BUILD_DIR/$TARBALL" | sha256sum --check --status >/dev/null 2>&1; then
     echo "Downloading $URL"
-    curl --fail --location --silent --show-error -o "$BUILD_DIR/$TARBALL" "$URL"
-    echo "$SHERPA_SHA256  $BUILD_DIR/$TARBALL" | sha256sum --check --quiet
+    curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+        -o "$BUILD_DIR/$TARBALL.tmp" "$URL"
+    echo "$SHERPA_SHA256  $BUILD_DIR/$TARBALL.tmp" | sha256sum --check --quiet
+    mv "$BUILD_DIR/$TARBALL.tmp" "$BUILD_DIR/$TARBALL"
 fi
 
 # 2. Fork the binding source out of the module cache.
@@ -58,6 +62,10 @@ chmod -R u+w "$FORK_DIR"
 mkdir -p "$FORK_DIR/$LIB_SUBDIR"
 tar -xjf "$BUILD_DIR/$TARBALL" -C "$FORK_DIR/$LIB_SUBDIR" --strip-components=2 \
     "sherpa-onnx-${SHERPA_VERSION}-linux-x64-static-lib/lib"
+if [[ ! -f "$FORK_DIR/$LIB_SUBDIR/libsherpa-onnx-c-api.a" ]]; then
+    echo "extracted archive is missing libsherpa-onnx-c-api.a; release layout changed?" >&2
+    exit 1
+fi
 
 # 4. Replace the dynamic link flags with a static archive group.
 #    --start-group/--end-group lets ld resolve the inter-archive references
