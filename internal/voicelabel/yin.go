@@ -2,10 +2,10 @@
 // (M/F/?) to each diarization cluster, using YIN-based fundamental
 // frequency estimation over the cluster's clean speech regions.
 //
-// This is intentionally pure DSP — no ML model, no network. Adult-male
-// vs adult-female F0 distributions barely overlap (males ~85–180 Hz
-// median, females ~165–255 Hz median), so a thresholded median F0 is
-// enough to disambiguate roughly 92–96% of speakers on clean
+// This is intentionally pure DSP -- no ML model, no network. Adult-male
+// vs adult-female F0 distributions barely overlap (males ~85-180 Hz
+// median, females ~165-255 Hz median), so a thresholded median F0 is
+// enough to disambiguate roughly 92-96% of speakers on clean
 // conversational audio.
 package voicelabel
 
@@ -14,7 +14,7 @@ type YINConfig struct {
 	// SampleRate is the input sample rate. Required.
 	SampleRate int
 
-	// FrameSize is the analysis-window length in samples. 50–80 ms is
+	// FrameSize is the analysis-window length in samples. 50-80 ms is
 	// the YIN sweet spot; 1024 samples = 64 ms at 16 kHz works well.
 	// Must exceed TauMax by enough samples for a stable autocorrelation.
 	FrameSize int
@@ -33,12 +33,12 @@ type YINConfig struct {
 
 	// Threshold is the YIN absolute-threshold value. Lags whose
 	// cumulative-mean-normalized difference dips below this are
-	// candidate periods. 0.10–0.15 is the standard range.
+	// candidate periods. 0.10-0.15 is the standard range.
 	Threshold float64
 }
 
 // DefaultYINConfig returns a tuning suited to 16 kHz speech: 64 ms
-// windows, 16 ms hop, F0 search range 60–400 Hz, threshold 0.15.
+// windows, 16 ms hop, F0 search range 60-400 Hz, threshold 0.15.
 func DefaultYINConfig(sampleRate int) YINConfig {
 	return YINConfig{
 		SampleRate: sampleRate,
@@ -114,7 +114,7 @@ func yinFrame(frame []float32, cfg YINConfig, diff, cmnd []float64) F0Frame {
 		}
 	}
 
-	// Step 4: absolute threshold — first τ ≥ TauMin whose d' dips below
+	// Step 4: absolute threshold -- first τ ≥ TauMin whose d' dips below
 	// Threshold; walk forward to the bottom of that local minimum so the
 	// parabolic refinement in step 5 sits on a true minimum.
 	tau := -1
@@ -133,7 +133,7 @@ func yinFrame(frame []float32, cfg YINConfig, diff, cmnd []float64) F0Frame {
 
 	// Step 5: parabolic interpolation around the chosen minimum for
 	// sub-sample period precision. Skip when at the edge of the search
-	// range — there's no left/right neighbor to interpolate against.
+	// range -- there's no left/right neighbor to interpolate against.
 	refined := float64(tau)
 	if tau > cfg.TauMin && tau < cfg.TauMax {
 		a, b, c := cmnd[tau-1], cmnd[tau], cmnd[tau+1]

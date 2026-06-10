@@ -90,7 +90,7 @@ func TestAssignSpeakers(t *testing.T) {
 				{Start: ms(100), End: ms(200), Text: " b"},
 				{Start: ms(200), End: ms(300), Text: " c"},
 			},
-			// two adjacent turns both labeled speaker 0 — common when the
+			// two adjacent turns both labeled speaker 0 -- common when the
 			// segmenter splits a long monologue.
 			turns: []diarize.Turn{
 				{Start: ms(0), End: ms(150), Speaker: 0},

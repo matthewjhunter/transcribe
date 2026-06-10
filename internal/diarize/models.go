@@ -30,11 +30,11 @@ const (
 type EmbeddingPreset string
 
 const (
-	// EmbeddingTitanetSmall is the default — ~22 MB, fast, decent
+	// EmbeddingTitanetSmall is the default -- ~22 MB, fast, decent
 	// English discrimination.
 	EmbeddingTitanetSmall EmbeddingPreset = "titanet_small"
 
-	// EmbeddingTitanetLarge is the larger NeMo TitaNet — ~95 MB, more
+	// EmbeddingTitanetLarge is the larger NeMo TitaNet -- ~95 MB, more
 	// discriminative; reduces over-clustering on noisy conversational
 	// audio at the cost of a slower diarization stage.
 	EmbeddingTitanetLarge EmbeddingPreset = "titanet_large"
@@ -85,7 +85,7 @@ func CacheDir() (string, error) {
 // preset selects which speaker-embedding model to fetch; see
 // EmbeddingPresets. Pass "" to use DefaultEmbeddingPreset.
 //
-// Authenticity is not verified — these are the canonical sherpa-onnx
+// Authenticity is not verified -- these are the canonical sherpa-onnx
 // release artifacts and we trust GitHub's TLS as the integrity boundary.
 // If you don't trust that, supply your own paths via Config and skip
 // EnsureModels.

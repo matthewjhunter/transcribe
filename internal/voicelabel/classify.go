@@ -38,7 +38,7 @@ type ClassifyOptions struct {
 	MaxF0Hz float64
 
 	// MaxClusterAudio caps the per-cluster audio analyzed. The aim is
-	// a stable median over 5–30 s of voiced speech; more is wasteful.
+	// a stable median over 5-30 s of voiced speech; more is wasteful.
 	// Default 30 s.
 	MaxClusterAudio time.Duration
 

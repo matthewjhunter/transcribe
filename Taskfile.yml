@@ -59,14 +59,14 @@ tasks:
       - go vet ./...
 
   fmt:
-    desc: Check formatting
+    desc: Check formatting (skips build/, which holds the upstream sherpa fork)
     cmds:
-      - test -z "$(gofmt -l .)"
+      - test -z "$(gofmt -l cmd internal)"
 
   fmt:fix:
     desc: Fix formatting
     cmds:
-      - gofmt -w .
+      - gofmt -w cmd internal
 
   lint:
     desc: Run golangci-lint

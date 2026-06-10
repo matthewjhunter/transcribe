@@ -157,7 +157,7 @@ func TestPlan_MixedScenario(t *testing.T) {
 
 func TestPlan_HardSplitThenMerge(t *testing.T) {
 	// A 20s segment hard-splits at MaxChunk=8s into pieces of ~6.67s.
-	// They are contiguous (gap=0) so they would merge — but their
+	// They are contiguous (gap=0) so they would merge -- but their
 	// merged span equals the original 20s which exceeds MaxChunk. The
 	// merge guard prevents that, so we keep three split pieces.
 	in := []Segment{seg(0, 20000)}

@@ -41,7 +41,7 @@ const (
 type Config struct {
 	// Endpoint is the OpenAI-compatible base URL. May be the bare
 	// "http://host:port/api/v1" or include the trailing
-	// "/audio/transcriptions" — both are accepted.
+	// "/audio/transcriptions" -- both are accepted.
 	Endpoint string
 
 	// APIKey is sent as Bearer auth; empty omits the header.
@@ -54,7 +54,7 @@ type Config struct {
 	Language string
 
 	// Timeout is forwarded to the default http.Client when HTTPClient is nil.
-	// Zero means no timeout — appropriate for long audio files.
+	// Zero means no timeout -- appropriate for long audio files.
 	Timeout time.Duration
 
 	// HTTPClient lets callers inject a custom client (tests, proxies, TLS).

@@ -47,7 +47,7 @@ func TestClassifyClusters_AdultMaleVsFemale(t *testing.T) {
 }
 
 // TestClassifyClusters_CrossoverIsUnknown verifies a voice in the
-// 155–180 Hz crossover zone produces the "?" label rather than
+// 155-180 Hz crossover zone produces the "?" label rather than
 // committing to M or F.
 func TestClassifyClusters_CrossoverIsUnknown(t *testing.T) {
 	const sr = 16000
@@ -100,7 +100,7 @@ func TestClassifyClusters_RespectsMaxClusterAudio(t *testing.T) {
 // almost no audio produces LabelUnknown rather than a confident guess.
 func TestClassifyClusters_TooFewFramesIsUnknown(t *testing.T) {
 	const sr = 16000
-	buf := sineWave(130, sr, 0.05) // 50 ms — not enough voiced frames
+	buf := sineWave(130, sr, 0.05) // 50 ms -- not enough voiced frames
 
 	turns := []diarize.Turn{{Start: 0, End: 50 * time.Millisecond, Speaker: 3}}
 

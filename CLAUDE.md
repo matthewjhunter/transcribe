@@ -46,16 +46,16 @@ input file
 ```
 
 VAD is on by default because Whisper-Large-v3 hallucinates on long-form
-conversational input — its `condition_on_previous_text` decoder bias can
+conversational input -- its `condition_on_previous_text` decoder bias can
 latch onto a phrase and emit it for tens of minutes straight. Per-chunk
 submission resets decoder state at every silence gap, bounding the
 blast radius of any single hallucination loop to one chunk.
 
 Voice labeling is on by default because diarization clusters are
-anonymous — `SPEAKER_00` carries no identity beyond "consistent voice."
+anonymous -- `SPEAKER_00` carries no identity beyond "consistent voice."
 Tagging each cluster M/F/? halves the search space when manually mapping
 clusters to known players. F0 from a YIN estimator is enough for two-class
-on adult voices (~92–96% on clean conversational audio); no ML model,
+on adult voices (~92-96% on clean conversational audio); no ML model,
 no Python sidecar, no extra dependency. The `wxtxt` format intentionally
 strips the label to preserve byte-for-byte WhisperX compatibility.
 
@@ -78,20 +78,20 @@ Sherpa-onnx runs in-process via Go bindings (`github.com/k2-fsa/sherpa-onnx-go`)
 - No live/streaming mode (offline files only).
 - No alternative ASR backends besides OpenAI-compatible HTTP.
 - No GPU acceleration of the diarization stage; CPU sherpa-onnx is the target. Diarization is the bottleneck on Strix Halo CPU but acceptable.
-- No internal HTTP API or job queue — that's a separate service-shaped project (`asrclient`-style) that could later wrap this CLI.
+- No internal HTTP API or job queue -- that's a separate service-shaped project (`asrclient`-style) that could later wrap this CLI.
 
 ## Output formats
 
-The `.txt` is read by humans and LLM agents (e.g. the OSG `osg-session-notes` skill treats it as committed source material), not parsed by any tool — `grep -r SPEAKER_ ~/git/osg` returns no matches outside vendored code. So format choice is about reader ergonomics, not byte-level compatibility.
+The `.txt` is read by humans and LLM agents (e.g. the OSG `osg-session-notes` skill treats it as committed source material), not parsed by any tool -- `grep -r SPEAKER_ ~/git/osg` returns no matches outside vendored code. So format choice is about reader ergonomics, not byte-level compatibility.
 
-- **`tstxt`** (default) — `[HH:MM:SS] [SPEAKER_NN (X)]: text\n` when voice labeling is on, `[HH:MM:SS] [SPEAKER_NN]: text\n` when off. Recommended: timestamps let a human or LLM jump back to the source video for a specific moment in a multi-hour session; the `(M)`/`(F)`/`(?)` tag halves the candidate set when manually mapping clusters to players.
-- **`wxtxt`** — `[SPEAKER_NN]: text\n`. Byte-for-byte match for WhisperX `--output_format txt --diarize` (verified against `~/Shadowmaze 2026-02-09.txt`). Voice labels are intentionally dropped here — WhisperX has no slot for them. Note: the WhisperX TXT format has *no* timestamps — the `[time --> time]` form is SRT/VTT, not TXT. Keep `wxtxt` only if some specific consumer requires byte-identical output.
-- **`json`** — array of `{start, end, speaker, label?, text}` for programmatic consumers. The `label` field uses `omitempty`, so unlabeled output stays clean.
+- **`tstxt`** (default) -- `[HH:MM:SS] [SPEAKER_NN (X)]: text\n` when voice labeling is on, `[HH:MM:SS] [SPEAKER_NN]: text\n` when off. Recommended: timestamps let a human or LLM jump back to the source video for a specific moment in a multi-hour session; the `(M)`/`(F)`/`(?)` tag halves the candidate set when manually mapping clusters to players.
+- **`wxtxt`** -- `[SPEAKER_NN]: text\n`. Byte-for-byte match for WhisperX `--output_format txt --diarize` (verified against `~/Shadowmaze 2026-02-09.txt`). Voice labels are intentionally dropped here -- WhisperX has no slot for them. Note: the WhisperX TXT format has *no* timestamps -- the `[time --> time]` form is SRT/VTT, not TXT. Keep `wxtxt` only if some specific consumer requires byte-identical output.
+- **`json`** -- array of `{start, end, speaker, label?, text}` for programmatic consumers. The `label` field uses `omitempty`, so unlabeled output stays clean.
 
 ## Deferred / open questions
 
-- Whether to enable Lemonade's NPU recipe is a server-side config decision, not a client one — out of scope here.
-- Word timestamps: required for alignment. Lemonade `whispercpp` returns segment + word timestamps with `response_format=verbose_json` — need to confirm and handle if any field is missing.
+- Whether to enable Lemonade's NPU recipe is a server-side config decision, not a client one -- out of scope here.
+- Word timestamps: required for alignment. Lemonade `whispercpp` returns segment + word timestamps with `response_format=verbose_json` -- need to confirm and handle if any field is missing.
 - VAD chunk overlap + dedup: chunks are currently cut at silences with no overlap, on the assumption that VAD boundaries don't bisect words. Add an overlap window with word-level dedup if real output shows boundary artifacts.
 - Back-channel preservation: short utterances (e.g. "yeah", "right") with > 0.5 s of silence on either side are below the merge threshold and below `--vad-min-chunk`, so they're dropped from the transcript. Diarization still attributes the time region to a speaker, but the line disappears. Lower thresholds rescue them at the cost of more requests and a higher loop-hallucination surface area.
 - Voice labeling beyond binary M/F: F0 alone can cleanly separate adult M / adult F / child but says nothing useful about specific adult age. Adult-vs-child detection is straightforward to add (children have higher F0 and shorter vocal tracts) if it ever matters; specific-age estimation is a much harder problem we don't need.
@@ -130,11 +130,11 @@ Unit tests for the aligner and the Whisper-response parser should not require ex
 
 - Single-dash short flags, double-dash long flags (Matthew's preference).
 - Taskfile.yml is the build entrypoint, not Makefile.
-- `cmd/transcribe/main.go` stays thin — orchestration only. All real logic in `internal/`.
-- The `wxtxt` format must remain byte-for-byte identical to WhisperX `--output_format txt --diarize` (i.e. `[SPEAKER_NN]: text\n`, no timestamps). Don't "fix" it by adding timestamps — that would silently break drop-in compatibility for any consumer that depends on the WhisperX line shape. Add new format constants instead.
+- `cmd/transcribe/main.go` stays thin -- orchestration only. All real logic in `internal/`.
+- The `wxtxt` format must remain byte-for-byte identical to WhisperX `--output_format txt --diarize` (i.e. `[SPEAKER_NN]: text\n`, no timestamps). Don't "fix" it by adding timestamps -- that would silently break drop-in compatibility for any consumer that depends on the WhisperX line shape. Add new format constants instead.
 
 ## Related work
 
-- `~/bin/transcribe.old` and `~/bin/extract-audio` — the retired bash scripts this replaces (renamed from `~/bin/transcribe`; kept for reference, no longer on PATH). The lossless audio-stream sibling output preserves the side effect of the old `extract-audio` helper.
-- `~/.local/share/whisperx/` — the Python WhisperX install on rainbow and halo. Reference for output format. Sample output: `~/Shadowmaze 2026-02-09.txt`.
-- `github.com/matthewjhunter/asrclient` — sibling Go module abstracting ASR backends for `dicta`. If a Whisper-HTTP backend lands there first, this tool should consume it rather than reimplementing.
+- `~/bin/transcribe.old` and `~/bin/extract-audio` -- the retired bash scripts this replaces (renamed from `~/bin/transcribe`; kept for reference, no longer on PATH). The lossless audio-stream sibling output preserves the side effect of the old `extract-audio` helper.
+- `~/.local/share/whisperx/` -- the Python WhisperX install on rainbow and halo. Reference for output format. Sample output: `~/Shadowmaze 2026-02-09.txt`.
+- `github.com/matthewjhunter/asrclient` -- sibling Go module abstracting ASR backends for `dicta`. If a Whisper-HTTP backend lands there first, this tool should consume it rather than reimplementing.

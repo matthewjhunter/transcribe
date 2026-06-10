@@ -2,7 +2,7 @@
 
 CLI that produces a speaker-labeled transcript from an audio or video file.
 
-The tool runs end-to-end on a local workstation: Silero VAD pre-chunking, Whisper transcription via an OpenAI-compatible HTTP backend (e.g. [Lemonade](https://lemonade-server.ai/)), speaker diarization, voice-characterization tagging (M / F / ?) via YIN F0, and word-level alignment — all in a single Go binary using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) for the speech models. No PyTorch, no Python at runtime.
+The tool runs end-to-end on a local workstation: Silero VAD pre-chunking, Whisper transcription via an OpenAI-compatible HTTP backend (e.g. [Lemonade](https://lemonade-server.ai/)), speaker diarization, voice-characterization tagging (M / F / ?) via YIN F0, and word-level alignment -- all in a single Go binary using [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) for the speech models. No PyTorch, no Python at runtime.
 
 ## Install
 
@@ -31,7 +31,7 @@ for details.
 
 ## Usage
 
-`--num-speakers` is required and intentionally has no default. The expected workflow is to count speakers from the recording (Roll20 attendees, Discord participants, etc.) and pass the exact number — wrong defaults produce wrong attribution, and clustering quality depends entirely on giving sherpa the right K.
+`--num-speakers` is required and intentionally has no default. The expected workflow is to count speakers from the recording (Roll20 attendees, Discord participants, etc.) and pass the exact number -- wrong defaults produce wrong attribution, and clustering quality depends entirely on giving sherpa the right K.
 
 ```bash
 # Standard run on a video:
@@ -66,7 +66,7 @@ Run `transcribe -h` for the full flag list.
 
 ## Side outputs
 
-For video inputs, `transcribe` writes a sibling lossless audio file next to the transcript using `ffmpeg -vn -acodec copy` — no re-encoding, just a stream copy into a container matching the source codec (aac → m4a, opus → opus, mp3 → mp3, vorbis → ogg, flac → flac, alac → m4a, ac3/eac3 → ac3/eac3, wmav → wma, pcm → wav). Existing siblings are skipped, so re-runs are idempotent. Use `--no-extract-audio` to disable.
+For video inputs, `transcribe` writes a sibling lossless audio file next to the transcript using `ffmpeg -vn -acodec copy` -- no re-encoding, just a stream copy into a container matching the source codec (aac → m4a, opus → opus, mp3 → mp3, vorbis → ogg, flac → flac, alac → m4a, ac3/eac3 → ac3/eac3, wmav → wma, pcm → wav). Existing siblings are skipped, so re-runs are idempotent. Use `--no-extract-audio` to disable.
 
 The sibling tracks the transcript's location: alongside the input by default, alongside `--output` when set, suppressed entirely for stdout output.
 
@@ -85,9 +85,9 @@ Whisper-Large-v3 has a well-known long-form failure mode where the decoder's `co
 
 ## Voice labels
 
-Diarization clusters are anonymous — `SPEAKER_00` just means "consistent voice." Mapping clusters to known speakers (player names, podcast guests, whatever) is otherwise a manual exercise of listening to one snippet per cluster.
+Diarization clusters are anonymous -- `SPEAKER_00` just means "consistent voice." Mapping clusters to known speakers (player names, podcast guests, whatever) is otherwise a manual exercise of listening to one snippet per cluster.
 
-The default pipeline tags each cluster with a coarse voice-characterization label (`M` / `F` / `?`) from the median fundamental frequency of its clean speech regions. With four players split 2 male + 2 female, that halves the candidate set per cluster. Pure DSP (YIN F0 estimation, no ML model, no Python sidecar). Accurate to roughly 92–96% on adult voices in clean conversational audio; the `?` label catches voices in the 155–180 Hz crossover zone rather than committing to a side.
+The default pipeline tags each cluster with a coarse voice-characterization label (`M` / `F` / `?`) from the median fundamental frequency of its clean speech regions. With four players split 2 male + 2 female, that halves the candidate set per cluster. Pure DSP (YIN F0 estimation, no ML model, no Python sidecar). Accurate to roughly 92-96% on adult voices in clean conversational audio; the `?` label catches voices in the 155-180 Hz crossover zone rather than committing to a side.
 
 Output looks like:
 
@@ -102,7 +102,7 @@ Output looks like:
 | `--label-male-max-hz` | 155 | Median F0 strictly below this labels the cluster `M`. |
 | `--label-female-min-hz` | 180 | Median F0 strictly above this labels the cluster `F`. Voices between the two thresholds get `?`. |
 
-Per-cluster median F0 and voiced-frame counts are logged at info, so when a label looks wrong you can see why. Labels never appear in `wxtxt` output — that format is mandated to be byte-for-byte WhisperX-compatible. JSON output adds a `label` field with `omitempty`.
+Per-cluster median F0 and voiced-frame counts are logged at info, so when a label looks wrong you can see why. Labels never appear in `wxtxt` output -- that format is mandated to be byte-for-byte WhisperX-compatible. JSON output adds a `label` field with `omitempty`.
 
 ## Models
 
@@ -164,7 +164,7 @@ These were measured before VAD pre-chunking landed; per-chunk submission adds so
 
 ## Why this exists
 
-Replaces a `~/bin/transcribe` shell script that ssh'd into a remote CUDA box to run WhisperX. The new tool keeps everything on the local workstation, removes the PyTorch+CUDA dependency, runs offline-first, and produces output that drops directly into the existing OSG session-notes pipeline. The Silero-VAD pre-chunking and lossless audio sibling output mirror behaviors the old WhisperX + `extract-audio` workflow had — neither was free, and skipping them turned out to be a regression.
+Replaces a `~/bin/transcribe` shell script that ssh'd into a remote CUDA box to run WhisperX. The new tool keeps everything on the local workstation, removes the PyTorch+CUDA dependency, runs offline-first, and produces output that drops directly into the existing OSG session-notes pipeline. The Silero-VAD pre-chunking and lossless audio sibling output mirror behaviors the old WhisperX + `extract-audio` workflow had -- neither was free, and skipping them turned out to be a regression.
 
 ## License
 

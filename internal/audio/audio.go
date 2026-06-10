@@ -173,7 +173,7 @@ func ExtractWAV(ctx context.Context, input, output string) error {
 // ReadFloat32 decodes the WAV file at path and returns its samples
 // normalized to [-1.0, 1.0] along with the sample rate.
 //
-// Multi-channel inputs are not supported — call ExtractWAV first to
+// Multi-channel inputs are not supported -- call ExtractWAV first to
 // guarantee a mono WAV. Returns an error rather than silently downmixing
 // to make any caller mistake explicit.
 func ReadFloat32(path string) ([]float32, int, error) {

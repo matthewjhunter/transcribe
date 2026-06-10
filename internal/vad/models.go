@@ -36,7 +36,7 @@ func CacheDir() (string, error) {
 // it from the sherpa-onnx GitHub releases when it's missing. Returns
 // the absolute path of the model file.
 //
-// Authenticity is not verified — this is the canonical sherpa-onnx
+// Authenticity is not verified -- this is the canonical sherpa-onnx
 // release artifact and we trust GitHub's TLS as the integrity boundary.
 func EnsureModel(ctx context.Context) (string, error) {
 	dir, err := CacheDir()
