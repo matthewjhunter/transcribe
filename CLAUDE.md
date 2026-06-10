@@ -103,7 +103,19 @@ go build ./...
 # or: task build
 ```
 
-CGO is required because sherpa-onnx wraps a C++ library. The binary needs `libonnxruntime.so` (and the sherpa shared lib) on `LD_LIBRARY_PATH` at runtime, or set `CGO_LDFLAGS` for a static link if upstream supports it.
+CGO is required because sherpa-onnx wraps a C++ library. The default build
+links the shared libs that ship inside the `sherpa-onnx-go-linux` module via
+an rpath into the Go module cache, so the installed binary breaks when the
+cache is cleaned.
+
+The static build avoids that: `task build:static` (or `task install:static`)
+runs `scripts/prepare-static.sh`, which downloads the sha256-pinned
+`linux-x64-static-lib` archive from the sherpa-onnx release matching the
+go.mod version, forks the binding into `build/sherpa-onnx-go-linux-static/`
+with static link flags, and generates `go.static.mod` with a replace
+directive. The default `go.mod` build is untouched. The build:static task
+fails if `ldd` still shows sherpa, onnxruntime, or libstdc++. When bumping
+sherpa-onnx-go, update `SHERPA_SHA256` in the script.
 
 ## Test
 

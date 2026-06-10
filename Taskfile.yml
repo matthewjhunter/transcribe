@@ -19,6 +19,30 @@ tasks:
     cmds:
       - go install ./cmd/{{.BINARY}}
 
+  static:prepare:
+    desc: Download static sherpa-onnx libs and generate go.static.mod (linux/amd64 only)
+    cmds:
+      - ./scripts/prepare-static.sh
+
+  build:static:
+    desc: Build a statically linked binary (no sherpa/onnxruntime/stdc++ shared libs)
+    cmds:
+      - task: static:prepare
+      - go build -modfile=go.static.mod -o {{.BINARY}} ./cmd/{{.BINARY}}
+      - |
+        if ldd {{.BINARY}} | grep -E "sherpa|onnxruntime|stdc[+][+]"; then
+          echo "build:static produced a binary with dynamic ML/C++ deps" >&2
+          exit 1
+        fi
+
+  install:static:
+    desc: Build the static binary and install it to $GOBIN (or $GOPATH/bin)
+    cmds:
+      - task: build:static
+      - |
+        bin="$(go env GOBIN)"
+        install -m 0755 {{.BINARY}} "${bin:-$(go env GOPATH)/bin}/{{.BINARY}}"
+
   run:
     desc: 'Build and run; pass args after --. Example: task run -- --num-speakers 4 file.mkv'
     cmds:

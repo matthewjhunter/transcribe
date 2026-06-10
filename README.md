@@ -12,6 +12,21 @@ go install github.com/matthewjhunter/transcribe/cmd/transcribe@latest
 
 CGO is required (sherpa-onnx wraps a C library; the prebuilt `libonnxruntime.so` and `libsherpa-onnx-c-api.so` ship with the bindings and are linked via rpath). Linux/amd64 is the only target wired up today.
 
+Note that `go install` links against shared libraries inside the Go module
+cache, so the installed binary breaks whenever the cache is cleaned
+(`libsherpa-onnx-c-api.so: cannot open shared object file`). For a binary that
+survives cache cleans, build statically from a clone instead:
+
+```bash
+task install:static
+```
+
+This downloads the matching [sherpa-onnx static-lib release](https://github.com/k2-fsa/sherpa-onnx/releases)
+(sha256-pinned) and links sherpa-onnx, onnxruntime, and libstdc++ into the
+binary; the only remaining dynamic dependency is glibc. Requires `libstdc++.a`
+(the g++ development package) at build time. See `scripts/prepare-static.sh`
+for details.
+
 `ffmpeg` and `ffprobe` must be on `$PATH` for input decoding.
 
 ## Usage
