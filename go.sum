@@ -12,5 +12,5 @@ github.com/k2-fsa/sherpa-onnx-go-macos v1.13.3 h1:nJTay2vlWTtkM68lbmyFB2dLuC4ssR
 github.com/k2-fsa/sherpa-onnx-go-macos v1.13.3/go.mod h1:ZOhUAXC62Unj0ZNfu6zxSFKcW96aXf7P3BsqiUyOBbE=
 github.com/k2-fsa/sherpa-onnx-go-windows v1.13.3 h1:N2mPb/wgpSNR6yUKW+aHcF9vh+ZFkg4LG3m4T4A9A7c=
 github.com/k2-fsa/sherpa-onnx-go-windows v1.13.3/go.mod h1:5AX7TU8+P/gInjglY1ijtWUM2b8iyR0QX4yEngzMe64=
-golang.org/x/sync v0.20.0 h1:e0PTpb7pjO8GAtTs2dQ6jYa5BWYlMuX047Dco/pItO4=
-golang.org/x/sync v0.20.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
+golang.org/x/sync v0.21.0 h1:HLII4xRRTtCRkxYp4HNFF0Js/Og6q2i++KXbg0gHCwM=
+golang.org/x/sync v0.21.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
