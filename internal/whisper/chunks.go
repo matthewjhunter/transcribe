@@ -23,11 +23,16 @@ import (
 //
 // Each chunk gets a fresh decoder state on the backend, so a Whisper
 // repetition loop on one chunk cannot poison adjacent chunks.
+//
+// Pass WithChunkStore to checkpoint completed chunks: a chunk already in
+// the store is loaded rather than re-requested, and every fresh chunk is
+// saved as it finishes, so a killed run resumes instead of starting over.
 func (c *Client) TranscribeChunks(
 	ctx context.Context,
 	samples []float32, sampleRate int,
 	chunks []vad.Chunk,
 	concurrency int,
+	opts ...ChunkOption,
 ) (*Result, error) {
 	if len(chunks) == 0 {
 		return &Result{}, nil
@@ -36,12 +41,28 @@ func (c *Client) TranscribeChunks(
 		concurrency = 1
 	}
 
+	var opt chunkOptions
+	for _, o := range opts {
+		o(&opt)
+	}
+
 	results := make([]*Result, len(chunks))
 	g, gctx := errgroup.WithContext(ctx)
 	sem := make(chan struct{}, concurrency)
 
 	for i, ch := range chunks {
 		g.Go(func() error {
+			key := ChunkKey(ch)
+
+			// A checkpointed chunk is served from the store without
+			// touching the backend or a concurrency slot.
+			if opt.store != nil {
+				if r, ok := opt.store.Load(key); ok {
+					results[i] = r
+					return nil
+				}
+			}
+
 			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
@@ -67,6 +88,12 @@ func (c *Client) TranscribeChunks(
 				return fmt.Errorf("whisper: chunk %d: %w", i, err)
 			}
 			results[i] = offsetResult(r, ch.Start)
+
+			if opt.store != nil {
+				if err := opt.store.Save(key, results[i]); err != nil {
+					return fmt.Errorf("whisper: chunk %d: checkpoint: %w", i, err)
+				}
+			}
 			return nil
 		})
 	}

@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/matthewjhunter/transcribe/internal/align"
 	"github.com/matthewjhunter/transcribe/internal/audio"
+	"github.com/matthewjhunter/transcribe/internal/checkpoint"
 	"github.com/matthewjhunter/transcribe/internal/diarize"
 	"github.com/matthewjhunter/transcribe/internal/output"
 	"github.com/matthewjhunter/transcribe/internal/vad"
@@ -54,6 +56,8 @@ type config struct {
 	vadMaxChunk   float64
 	vadMinChunk   float64
 	vadModel      string
+
+	noResume bool
 
 	noExtractAudio bool
 
@@ -124,6 +128,7 @@ func parseFlags(args []string) (config, error) {
 	fs.Float64Var(&cfg.vadMaxChunk, "vad-max-chunk", 28, "Hard cap on chunk length sent to the backend, in seconds.")
 	fs.Float64Var(&cfg.vadMinChunk, "vad-min-chunk", 1, "Drop chunks shorter than N seconds after merging.")
 	fs.StringVar(&cfg.vadModel, "vad-model", "", "Path to silero_vad.onnx. Empty = auto-cache.")
+	fs.BoolVar(&cfg.noResume, "no-resume", false, "Ignore any <input>.transcribe-progress.jsonl checkpoint and transcribe every chunk fresh.")
 	fs.BoolVar(&cfg.noExtractAudio, "no-extract-audio", false, "Don't write a sibling lossless audio-stream copy next to the transcript.")
 	fs.BoolVar(&cfg.noLabelGender, "no-label-gender", false, "Don't tag each diarization cluster with an M/F/? voice label.")
 	fs.Float64Var(&cfg.labelMaleMaxHz, "label-male-max-hz", 155, "Median F0 strictly below this (Hz) labels the cluster M.")
@@ -256,6 +261,18 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 		Language: cfg.language,
 	})
 
+	// Checkpoint completed chunks so a killed run resumes instead of
+	// re-transcribing hours of audio. Only the VAD-chunked path benefits:
+	// --no-vad is a single request with nothing to resume mid-way. A
+	// checkpoint failure disables resume but never blocks transcription.
+	var chunkStore *checkpoint.Store
+	if !cfg.noVAD {
+		chunkStore = openCheckpoint(log, cfg)
+		if chunkStore != nil {
+			defer chunkStore.Close()
+		}
+	}
+
 	var (
 		result *whisper.Result
 		turns  []diarize.Turn
@@ -273,7 +290,13 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 		} else {
 			log.Info("transcribing chunks", "url", cfg.whisperURL, "model", cfg.whisperModel,
 				"chunks", len(chunks), "concurrency", cfg.whisperConcurrency)
-			r, err = wc.TranscribeChunks(gctx, samples, sampleRate, chunks, cfg.whisperConcurrency)
+			// Only pass the store when it exists: a typed-nil *Store handed
+			// to the interface option would read as non-nil and panic.
+			var opts []whisper.ChunkOption
+			if chunkStore != nil {
+				opts = append(opts, whisper.WithChunkStore(chunkStore))
+			}
+			r, err = wc.TranscribeChunks(gctx, samples, sampleRate, chunks, cfg.whisperConcurrency, opts...)
 		}
 		if err != nil {
 			return fmt.Errorf("whisper: %w", err)
@@ -312,7 +335,54 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 	if err := output.Render(lines, w, cfg.outputFormat); err != nil {
 		return fmt.Errorf("render: %w", err)
 	}
+
+	// The transcript is written; drop the checkpoint so a successful run
+	// leaves no sidecar behind.
+	if chunkStore != nil {
+		if err := chunkStore.Discard(); err != nil {
+			log.Warn("could not remove checkpoint sidecar", "path", progressPath(cfg), "err", err)
+		}
+	}
 	return nil
+}
+
+// progressPath is the checkpoint sidecar for an input: the input path with
+// a fixed suffix, so it sits next to the source like the extracted-audio
+// sibling does and is keyed to the stable input identity, not the (possibly
+// stdout) output path.
+func progressPath(cfg config) string {
+	return cfg.input + ".transcribe-progress.jsonl"
+}
+
+// openCheckpoint prepares the resume sidecar for a VAD-chunked run. It
+// returns nil (checkpointing disabled) rather than failing the run when the
+// sidecar cannot be opened -- resume is an accelerator, not a dependency.
+// With --no-resume it first removes any existing sidecar so the run starts
+// clean while still checkpointing its own progress.
+func openCheckpoint(log *slog.Logger, cfg config) *checkpoint.Store {
+	path := progressPath(cfg)
+	if cfg.noResume {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			log.Warn("could not clear checkpoint for --no-resume", "path", path, "err", err)
+		}
+	}
+
+	fp := checkpoint.Fingerprint(
+		cfg.whisperModel,
+		cfg.language,
+		strconv.FormatFloat(cfg.vadMinSilence, 'g', -1, 64),
+		strconv.FormatFloat(cfg.vadMaxChunk, 'g', -1, 64),
+		strconv.FormatFloat(cfg.vadMinChunk, 'g', -1, 64),
+	)
+	store, err := checkpoint.Open(path, fp)
+	if err != nil {
+		log.Warn("checkpoint disabled: could not open sidecar", "path", path, "err", err)
+		return nil
+	}
+	if n := store.Count(); n > 0 {
+		log.Info("resuming from checkpoint", "chunks", n, "path", path)
+	}
+	return store
 }
 
 // applyVoiceLabels classifies each diarization cluster by median F0

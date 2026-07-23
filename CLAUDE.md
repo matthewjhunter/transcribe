@@ -59,6 +59,20 @@ on adult voices (~92-96% on clean conversational audio); no ML model,
 no Python sidecar, no extra dependency. The `wxtxt` format intentionally
 strips the label to preserve byte-for-byte WhisperX compatibility.
 
+Chunk transcription is checkpointed: each completed chunk's result is
+fsync'd to a `<input>.transcribe-progress.jsonl` sidecar as it lands, and a
+re-run loads finished chunks instead of re-requesting them. Long runs are
+exactly when a kill, an OOM, or a lid-close is most likely, and without this
+the whole run's in-memory results are lost. The sidecar is keyed by a run
+fingerprint (model, language, VAD params), so changing any `--vad-*` flag or
+the model discards the stale checkpoint rather than reusing wrong segments;
+it is deleted on success, and `--no-resume` forces a clean run. Resume is an
+accelerator, not a dependency -- a sidecar that can't be opened disables
+checkpointing and logs a warning rather than failing the transcription.
+Diarization is the other long phase and would benefit from the same
+treatment; chunk-level Whisper results are the bulk of the wall time and the
+first win.
+
 ## Backend choice
 
 Whisper backend is OpenAI-compatible HTTP, configurable via flag/env:
