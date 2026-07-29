@@ -139,3 +139,55 @@ func TestRender_EmptyInput(t *testing.T) {
 		t.Errorf("expected empty output, got %q", buf.String())
 	}
 }
+
+// A recording start time turns the relative offsets into wall-clock stamps, so
+// the transcript can be merged with other timestamped session sources (Roll20
+// chat logs) without having to guess the offset after the fact.
+func TestRender_AbsoluteGolden(t *testing.T) {
+	want, err := os.ReadFile("testdata/absolute.golden.txt")
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	start := time.Date(2026, 7, 28, 20, 35, 45, 0, time.UTC)
+	var buf bytes.Buffer
+	if err := RenderFrom(fixture, &buf, FormatTimestampedTXT, start); err != nil {
+		t.Fatalf("RenderFrom: %v", err)
+	}
+	if !bytes.Equal(buf.Bytes(), want) {
+		t.Errorf("output mismatch:\ngot:  %q\nwant: %q", buf.String(), string(want))
+	}
+}
+
+// A zero start time must behave exactly like Render, so existing callers and
+// output consumers are unaffected.
+func TestRenderFrom_ZeroStartMatchesRelative(t *testing.T) {
+	var abs, rel bytes.Buffer
+	if err := RenderFrom(fixture, &abs, FormatTimestampedTXT, time.Time{}); err != nil {
+		t.Fatalf("RenderFrom: %v", err)
+	}
+	if err := Render(fixture, &rel, FormatTimestampedTXT); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !bytes.Equal(abs.Bytes(), rel.Bytes()) {
+		t.Errorf("zero start diverged:\ngot:  %q\nwant: %q", abs.String(), rel.String())
+	}
+}
+
+// The start time only applies to the timestamped format; wxtxt has no
+// timestamp slot and json carries raw offsets for programmatic consumers.
+func TestRenderFrom_StartIgnoredByOtherFormats(t *testing.T) {
+	start := time.Date(2026, 7, 28, 20, 35, 45, 0, time.UTC)
+	for _, f := range []Format{FormatWhisperXTXT, FormatJSON} {
+		var withStart, without bytes.Buffer
+		if err := RenderFrom(fixture, &withStart, f, start); err != nil {
+			t.Fatalf("RenderFrom(%d): %v", f, err)
+		}
+		if err := Render(fixture, &without, f); err != nil {
+			t.Fatalf("Render(%d): %v", f, err)
+		}
+		if !bytes.Equal(withStart.Bytes(), without.Bytes()) {
+			t.Errorf("format %d changed with a start time:\ngot:  %q\nwant: %q",
+				f, withStart.String(), without.String())
+		}
+	}
+}

@@ -42,6 +42,7 @@ type config struct {
 
 	outputPath   string
 	outputFormat output.Format
+	startTime    string
 
 	whisperURL         string
 	whisperModel       string
@@ -114,6 +115,10 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&cfg.outputPath, "output", "", "Output path. Default: <input-without-ext>.txt next to the input. Use - for stdout.")
 	fs.StringVar(&cfg.outputPath, "o", "", "Shorthand for --output.")
 	fs.StringVar(&format, "output-format", "tstxt", "tstxt | wxtxt | json")
+	fs.StringVar(&cfg.startTime, "start-time", "",
+		`Wall-clock start of the recording, making tstxt timestamps absolute instead of `+
+			`relative. "auto" derives it as file mtime minus duration. Or pass `+
+			`2006-01-02T15:04:05 explicitly. Empty (default) keeps relative timestamps.`)
 	fs.StringVar(&cfg.whisperURL, "whisper-url", whisper.DefaultEndpoint, "OpenAI-compatible /v1 base URL.")
 	fs.StringVar(&cfg.whisperModel, "whisper-model", whisper.DefaultModel, "Model name passed to the backend.")
 	fs.StringVar(&cfg.whisperAPIKey, "whisper-api-key", apiKeyDefault, "Bearer token; defaults to $WHISPER_API_KEY.")
@@ -309,10 +314,49 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 		return err
 	}
 	defer closeFn()
-	if err := output.Render(lines, w, cfg.outputFormat); err != nil {
+	start, err := resolveStartTime(cfg, probe.Duration)
+	if err != nil {
+		return err
+	}
+	if !start.IsZero() {
+		log.Info("absolute timestamps", "recording_start", start.Format(output.AbsoluteLayout))
+	}
+	if err := output.RenderFrom(lines, w, cfg.outputFormat, start); err != nil {
 		return fmt.Errorf("render: %w", err)
 	}
 	return nil
+}
+
+// resolveStartTime turns the --start-time flag into the wall-clock instant the
+// recording began. A zero return means "leave timestamps relative".
+//
+// The "auto" mode reads it off the input file's modification time: the last
+// write happens when recording stops, so subtracting the media duration lands
+// on the start. That agrees with the filesystem birth time where one is
+// available, and unlike birth time it does not depend on the filesystem
+// supporting statx. It does assume mtime was preserved -- a copy made without
+// -p will have moved it, so pass an explicit timestamp in that case.
+func resolveStartTime(cfg config, dur time.Duration) (time.Time, error) {
+	switch cfg.startTime {
+	case "":
+		return time.Time{}, nil
+	case "auto":
+		if dur <= 0 {
+			return time.Time{}, fmt.Errorf("--start-time auto: input duration is unknown")
+		}
+		fi, err := os.Stat(cfg.input)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("--start-time auto: %w", err)
+		}
+		return fi.ModTime().Add(-dur), nil
+	default:
+		t, err := time.ParseInLocation(output.AbsoluteLayout, cfg.startTime, time.Local)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("--start-time %q: want %q or \"auto\": %w",
+				cfg.startTime, output.AbsoluteLayout, err)
+		}
+		return t, nil
+	}
 }
 
 // applyVoiceLabels classifies each diarization cluster by median F0
