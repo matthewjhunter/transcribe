@@ -151,6 +151,30 @@ The Whisper response shape is normalized: top-level `words[]` (OpenAI) and neste
 | `wxtxt` | | `[SPEAKER_NN]: text` (WhisperX byte-for-byte; never carries voice labels) |
 | `json` | | `[{start, end, speaker, label?, text}, ...]` (`label` is `omitempty`) |
 
+### Absolute timestamps
+
+`tstxt` timestamps are relative to the start of the recording. Pass
+`--start-time` to make them wall-clock instead, which lets a transcript be
+merged with other timestamped records of the same session (a chat log, a stream
+of dice rolls) by timestamp alone, with no offset to guess afterwards:
+
+```bash
+transcribe --num-speakers 4 --start-time auto session.mkv
+# [2026-07-28T20:35:45] [SPEAKER_00 (M)]: text
+```
+
+`auto` derives the start as the input file's mtime minus its duration -- the
+last write is when recording stopped, so backing off its length lands on the
+start. That agrees with the filesystem birth time to within milliseconds, and
+unlike birth time it needs no `statx` support. It does assume mtime survived
+since recording; a copy made without `-p` will have moved it, so pass the
+timestamp explicitly (`--start-time 2026-07-28T20:35:45`) in that case.
+
+The layout is `YYYY-MM-DDTHH:MM:SS`, dated rather than a bare clock so that it
+sorts lexicographically and stays unambiguous across a session running past
+midnight. Only `tstxt` is affected: `wxtxt` has no timestamp slot, and `json`
+keeps raw offsets for programmatic consumers.
+
 ## Performance
 
 Indicative timing on Matthew's workstation against Lemonade-on-halo with `Whisper-Large-v3-Turbo` and the default `titanet_large` embedding:

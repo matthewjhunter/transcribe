@@ -30,11 +30,28 @@ const (
 	FormatJSON
 )
 
-// Render writes lines to w in the requested format.
+// AbsoluteLayout is the timestamp layout used when a recording start time is
+// known. Chosen to sort lexicographically and to survive a session that runs
+// past midnight, which a bare wall clock would not.
+const AbsoluteLayout = "2006-01-02T15:04:05"
+
+// Render writes lines to w in the requested format, with timestamps relative to
+// the start of the recording.
 func Render(lines []align.SpeakerLine, w io.Writer, f Format) error {
+	return RenderFrom(lines, w, f, time.Time{})
+}
+
+// RenderFrom writes lines to w in the requested format. If start is non-zero,
+// FormatTimestampedTXT emits absolute timestamps (start + each line's offset)
+// instead of relative ones, so the transcript can be merged with other
+// timestamped records of the same session by timestamp alone.
+//
+// start is ignored by the other formats: wxtxt has no timestamp slot, and json
+// carries raw offsets for programmatic consumers.
+func RenderFrom(lines []align.SpeakerLine, w io.Writer, f Format, start time.Time) error {
 	switch f {
 	case FormatTimestampedTXT:
-		return renderTimestamped(lines, w)
+		return renderTimestamped(lines, w, start)
 	case FormatWhisperXTXT:
 		return renderWhisperX(lines, w)
 	case FormatJSON:
@@ -44,15 +61,22 @@ func Render(lines []align.SpeakerLine, w io.Writer, f Format) error {
 	}
 }
 
-func renderTimestamped(lines []align.SpeakerLine, w io.Writer) error {
+func renderTimestamped(lines []align.SpeakerLine, w io.Writer, start time.Time) error {
 	for _, l := range lines {
-		h, m, s := splitHMS(l.Start)
 		speaker := fmt.Sprintf("SPEAKER_%02d", l.Speaker)
 		if l.Label != "" {
 			speaker = fmt.Sprintf("SPEAKER_%02d (%s)", l.Speaker, l.Label)
 		}
-		if _, err := fmt.Fprintf(w, "[%02d:%02d:%02d] [%s]: %s\n",
-			h, m, s, speaker, l.Text); err != nil {
+
+		var stamp string
+		if start.IsZero() {
+			h, m, s := splitHMS(l.Start)
+			stamp = fmt.Sprintf("%02d:%02d:%02d", h, m, s)
+		} else {
+			stamp = start.Add(l.Start).Format(AbsoluteLayout)
+		}
+
+		if _, err := fmt.Fprintf(w, "[%s] [%s]: %s\n", stamp, speaker, l.Text); err != nil {
 			return err
 		}
 	}
