@@ -14,11 +14,20 @@
 # Build with: go build -modfile=go.static.mod ./cmd/transcribe
 # (or just run: task build:static)
 #
-# When bumping sherpa-onnx-go in go.mod, update SHERPA_SHA256 below to the
-# checksum of the matching linux-x64-static-lib release tarball.
+# When bumping sherpa-onnx-go in go.mod, update BOTH pins below to the matching
+# linux-x64-static-lib release tarball. The version pin exists so that a bump
+# which forgets the checksum fails with a message saying so, rather than with a
+# bare checksum mismatch that looks like a corrupt download or a tampered file.
+# (That is exactly how this broke: dependabot walked go.mod from v1.13.0 to
+# v1.13.4 and left the checksum behind.)
+#
+# The published digest for a release asset is visible without downloading it:
+#   curl -s https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags/vX.Y.Z \
+#     | jq -r '.assets[] | select(.name|endswith("linux-x64-static-lib.tar.bz2")) | .digest'
 set -euo pipefail
 
-SHERPA_SHA256="a314a0763465e9969d9b62987053ccf61b423eeedb944ad49fe319595a22fbe2"
+SHERPA_PINNED_VERSION="v1.13.4"
+SHERPA_SHA256="98b0e31996426f6e78244dbce1955548f2c64e8f01c4be75b85af7cdaa2e8d5c"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -31,6 +40,19 @@ fi
 
 # Keep the static libs pinned to the same version go.mod uses for the binding.
 SHERPA_VERSION="$(go list -m -f '{{.Version}}' github.com/k2-fsa/sherpa-onnx-go-linux)"
+if [[ "$SHERPA_VERSION" != "$SHERPA_PINNED_VERSION" ]]; then
+    cat >&2 <<EOF
+go.mod has github.com/k2-fsa/sherpa-onnx-go-linux at $SHERPA_VERSION, but
+scripts/prepare-static.sh pins the static libs at $SHERPA_PINNED_VERSION.
+
+Update SHERPA_PINNED_VERSION and SHERPA_SHA256 together at the top of that
+script. The upstream digest for the new release:
+
+  curl -s https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags/$SHERPA_VERSION \\
+    | jq -r '.assets[] | select(.name|endswith("linux-x64-static-lib.tar.bz2")) | .digest'
+EOF
+    exit 1
+fi
 TARBALL="sherpa-onnx-${SHERPA_VERSION}-linux-x64-static-lib.tar.bz2"
 URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/${SHERPA_VERSION}/${TARBALL}"
 
