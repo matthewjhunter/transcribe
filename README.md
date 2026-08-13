@@ -35,7 +35,7 @@ for details.
 
 ```bash
 # Standard run on a video:
-#   - writes <input>.txt with [HH:MM:SS] [SPEAKER_NN (M|F|?)]: text
+#   - writes <input>.txt with [YYYY-MM-DDTHH:MM:SS] [SPEAKER_NN (M|F|?)]: text
 #   - writes <input>.m4a (lossless audio stream copy from the source)
 transcribe --num-speakers 4 path/to/recording.mkv
 
@@ -92,8 +92,8 @@ The default pipeline tags each cluster with a coarse voice-characterization labe
 Output looks like:
 
 ```
-[00:00:00] [SPEAKER_00 (M)]: Okay, so Bancroft comes in.
-[00:00:48] [SPEAKER_02 (F)]: From the flying creatures, that sounds like...
+[2026-07-28T20:35:45] [SPEAKER_00 (M)]: Okay, so Bancroft comes in.
+[2026-07-28T20:36:33] [SPEAKER_02 (F)]: From the flying creatures, that sounds like...
 ```
 
 | Flag | Default | Behavior |
@@ -147,28 +147,37 @@ The Whisper response shape is normalized: top-level `words[]` (OpenAI) and neste
 
 | Format | Default | Layout |
 |---|---|---|
-| `tstxt` | yes | `[HH:MM:SS] [SPEAKER_NN (X)]: text` (parenthetical absent when `--no-label-gender`) |
+| `tstxt` | yes | `[YYYY-MM-DDTHH:MM:SS] [SPEAKER_NN (X)]: text`, or `[HH:MM:SS]` under `--start-time relative` (parenthetical absent when `--no-label-gender`) |
 | `wxtxt` | | `[SPEAKER_NN]: text` (WhisperX byte-for-byte; never carries voice labels) |
 | `json` | | `[{start, end, speaker, label?, text}, ...]` (`label` is `omitempty`) |
 
 ### Absolute timestamps
 
-`tstxt` timestamps are relative to the start of the recording. Pass
-`--start-time` to make them wall-clock instead, which lets a transcript be
-merged with other timestamped records of the same session (a chat log, a stream
-of dice rolls) by timestamp alone, with no offset to guess afterwards:
+`tstxt` timestamps are wall-clock by default, which lets a transcript be merged
+with other timestamped records of the same session (a chat log, a stream of dice
+rolls) by timestamp alone, with no offset to guess afterwards:
 
 ```bash
-transcribe --num-speakers 4 --start-time auto session.mkv
+transcribe --num-speakers 4 session.mkv
 # [2026-07-28T20:35:45] [SPEAKER_00 (M)]: text
 ```
 
-`auto` derives the start as the input file's mtime minus its duration -- the
-last write is when recording stopped, so backing off its length lands on the
-start. That agrees with the filesystem birth time to within milliseconds, and
-unlike birth time it needs no `statx` support. It does assume mtime survived
-since recording; a copy made without `-p` will have moved it, so pass the
-timestamp explicitly (`--start-time 2026-07-28T20:35:45`) in that case.
+That is `--start-time auto`, the default. It derives the start as the input
+file's mtime minus its duration -- the last write is when recording stopped, so
+backing off its length lands on the start. That agrees with the filesystem birth
+time to within milliseconds, and unlike birth time it needs no `statx` support.
+It does assume mtime survived since recording; a copy made without `-p` will
+have moved it, so pass the timestamp explicitly
+(`--start-time 2026-07-28T20:35:45`) in that case.
+
+`--start-time relative` opts back out, restoring offsets from the start of the
+recording.
+
+If `auto` cannot be derived -- an unknown duration, an input that has gone away
+-- the behaviour depends on how it was reached. Asked for explicitly it is a
+hard error, because doing something other than what was asked for is worse than
+stopping. Arrived at by default it logs a warning and falls back to relative
+timestamps, so the default cannot break a run that would otherwise have worked.
 
 The layout is `YYYY-MM-DDTHH:MM:SS`, dated rather than a bare clock so that it
 sorts lexicographically and stays unambiguous across a session running past
