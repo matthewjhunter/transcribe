@@ -7,13 +7,13 @@ toolchain go1.26.5
 require (
 	github.com/go-audio/audio v1.0.0
 	github.com/go-audio/wav v1.1.0
-	github.com/k2-fsa/sherpa-onnx-go v1.13.4
+	github.com/k2-fsa/sherpa-onnx-go v1.13.5
 	golang.org/x/sync v0.22.0
 )
 
 require (
 	github.com/go-audio/riff v1.0.0 // indirect
-	github.com/k2-fsa/sherpa-onnx-go-linux v1.13.4 // indirect
-	github.com/k2-fsa/sherpa-onnx-go-macos v1.13.4 // indirect
-	github.com/k2-fsa/sherpa-onnx-go-windows v1.13.4 // indirect
+	github.com/k2-fsa/sherpa-onnx-go-linux v1.13.5 // indirect
+	github.com/k2-fsa/sherpa-onnx-go-macos v1.13.5 // indirect
+	github.com/k2-fsa/sherpa-onnx-go-windows v1.13.5 // indirect
 )
