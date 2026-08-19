@@ -41,6 +41,14 @@ transcribe --num-speakers 4 path/to/recording.mkv
 
 # Pin to a specific Lemonade host
 transcribe --whisper-url http://halo:13305/api/v1 --num-speakers 4 session.mkv
+```
+
+Or set it once, per machine, and drop the flag:
+
+```bash
+export WHISPER_URL=http://halo:13305/api/v1
+export WHISPER_MODEL=Whisper-Large-v3-Turbo
+transcribe --num-speakers 4 session.mkv
 
 # Match the historical WhisperX `[SPEAKER_NN]: text` format byte-for-byte
 transcribe --output-format wxtxt --num-speakers 4 session.mkv

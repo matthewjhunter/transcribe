@@ -62,9 +62,14 @@ strips the label to preserve byte-for-byte WhisperX compatibility.
 ## Backend choice
 
 Whisper backend is OpenAI-compatible HTTP, configurable via flag/env:
-- `--whisper-url` (default `http://localhost:13305/api/v1`)
-- `--whisper-model` (default `Whisper-Large-v3`)
-- `--whisper-api-key` (default empty; Lemonade does not require auth)
+- `--whisper-url` (default `$WHISPER_URL`, else `http://localhost:13305/api/v1`)
+- `--whisper-model` (default `$WHISPER_MODEL`, else `Whisper-Large-v3`)
+- `--whisper-api-key` (default `$WHISPER_API_KEY`; Lemonade does not require auth)
+
+All three read the environment so the backend can be set once per machine
+instead of on every command line -- which host serves ASR is a property of the
+machine, not of the run. An explicit flag always wins over the environment, so
+a one-off against a different backend stays a one-liner.
 
 This means the same binary works against:
 - **Lemonade on halo** (NPU when the `whispercpp` recipe loads the `*-vitisai.rai` cache)

@@ -101,6 +101,16 @@ func run() error {
 	return nil
 }
 
+// envOr returns the environment variable's value, or fallback when it is unset
+// or empty. Empty is treated as unset so that WHISPER_URL= in a profile clears
+// the override rather than pointing the client at "".
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func parseFlags(args []string) (config, error) {
 	fs := flag.NewFlagSet("transcribe", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -110,7 +120,12 @@ func parseFlags(args []string) (config, error) {
 		format  string
 		showVer bool
 	)
+	// Which host in the fleet serves ASR is a property of the machine, not of
+	// the invocation, so it is settable once in the shell profile. An explicit
+	// flag still wins -- flag.StringVar's default is only used when unset.
 	apiKeyDefault := os.Getenv("WHISPER_API_KEY")
+	urlDefault := envOr("WHISPER_URL", whisper.DefaultEndpoint)
+	modelDefault := envOr("WHISPER_MODEL", whisper.DefaultModel)
 
 	fs.StringVar(&cfg.outputPath, "output", "", "Output path. Default: <input-without-ext>.txt next to the input. Use - for stdout.")
 	fs.StringVar(&cfg.outputPath, "o", "", "Shorthand for --output.")
@@ -119,8 +134,8 @@ func parseFlags(args []string) (config, error) {
 		`Wall-clock start of the recording, making tstxt timestamps absolute instead of `+
 			`relative. "auto" derives it as file mtime minus duration. Or pass `+
 			`2006-01-02T15:04:05 explicitly. Empty (default) keeps relative timestamps.`)
-	fs.StringVar(&cfg.whisperURL, "whisper-url", whisper.DefaultEndpoint, "OpenAI-compatible /v1 base URL.")
-	fs.StringVar(&cfg.whisperModel, "whisper-model", whisper.DefaultModel, "Model name passed to the backend.")
+	fs.StringVar(&cfg.whisperURL, "whisper-url", urlDefault, "OpenAI-compatible /v1 base URL; defaults to $WHISPER_URL.")
+	fs.StringVar(&cfg.whisperModel, "whisper-model", modelDefault, "Model name passed to the backend; defaults to $WHISPER_MODEL.")
 	fs.StringVar(&cfg.whisperAPIKey, "whisper-api-key", apiKeyDefault, "Bearer token; defaults to $WHISPER_API_KEY.")
 	fs.IntVar(&cfg.whisperConcurrency, "whisper-concurrency", 1, "Parallel transcription requests when VAD chunking is on.")
 	fs.StringVar(&cfg.language, "language", "en", "ISO-639-1 language hint. Empty for auto-detect.")
