@@ -74,7 +74,7 @@ Measured over 300 s of audio on a 32-thread Ryzen AI MAX+ 395:
 | 8 | 0.6 s | 12.2 s |
 | 32 (`NumCPU`) | 12.1 s | 24.9 s |
 
-Silero is a ~2 MB model stepped 512 samples at a time: there is nothing in a
+Silero is a ~629 KB model stepped 512 samples at a time: there is nothing in a
 window to parallelise, so the pool's per-window synchronisation is pure
 overhead and one thread wins by 24x. Segmentation and embedding are real
 models that do gain from threads, but only to about eight; beyond that

@@ -19,7 +19,7 @@ import (
 const defaultSampleRate = 16000
 
 // defaultThreads is the ONNX threadpool size used when Config.NumThreads is
-// unset. Silero is a ~2 MB model stepped 512 samples at a time, so there is
+// unset. Silero is a ~629 KB model stepped 512 samples at a time, so there is
 // almost nothing in a window to parallelise and the pool's per-window
 // synchronisation dominates the arithmetic. Handing it every core makes it
 // dramatically slower, not faster: measured over 300 s of audio on a
