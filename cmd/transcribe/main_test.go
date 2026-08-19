@@ -205,3 +205,45 @@ func TestParseFlags_VADThreadsIsSeparateFromDiarizeThreads(t *testing.T) {
 		t.Errorf("vadThreads=%d diarizeThreads=%d, want 4 and 0", cfg.vadThreads, cfg.diarizeThreads)
 	}
 }
+
+// The sibling audio file must inherit the source's modification time. It is a
+// re-container of the same recording, and --start-time auto derives the
+// recording start from mtime minus duration -- so a sibling stamped with the
+// time transcribe happened to run dates the recording to the wrong hour, and
+// transcribing it later yields silently wrong wall-clock timestamps.
+func TestCopyModTime(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "session.mkv")
+	dst := filepath.Join(dir, "session.m4a")
+	for _, p := range []string{src, dst} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := time.Date(2026, 8, 18, 20, 50, 17, 0, time.Local)
+	if err := os.Chtimes(src, want, want); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyModTime(src, dst); err != nil {
+		t.Fatalf("copyModTime: %v", err)
+	}
+	fi, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fi.ModTime().Equal(want) {
+		t.Errorf("dst mtime = %v, want %v", fi.ModTime(), want)
+	}
+}
+
+func TestCopyModTime_MissingSource(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "session.m4a")
+	if err := os.WriteFile(dst, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyModTime(filepath.Join(dir, "not-there.mkv"), dst); err == nil {
+		t.Error("expected an error when the source does not exist")
+	}
+}

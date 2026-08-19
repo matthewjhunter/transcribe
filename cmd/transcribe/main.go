@@ -415,7 +415,36 @@ func extractAudioSibling(ctx context.Context, log *slog.Logger, cfg config, prob
 	if err := audio.ExtractAudioStream(ctx, cfg.input, dst); err != nil {
 		return fmt.Errorf("extract audio stream: %w", err)
 	}
+	// Not fatal: the transcript this run produces is already correct, and
+	// refusing to finish a three-hour job over a timestamp would be a poor
+	// trade. But say so loudly, because the consequence is silent and lands
+	// later, on whoever transcribes the sibling.
+	if err := copyModTime(cfg.input, dst); err != nil {
+		log.Warn("could not stamp the audio sibling with the source mtime; "+
+			"transcribing it later will derive the wrong recording start",
+			"err", err, "out", dst)
+	}
 	return nil
+}
+
+// copyModTime stamps dst with src's modification time.
+//
+// The sibling audio file is a re-container of the source's audio stream, so it
+// is the same recording and has to carry the same wall-clock identity.
+// --start-time auto derives the recording start as mtime minus duration, and a
+// freshly written file carries the time transcribe ran instead. Transcribing
+// the sibling would then place the session however long the run took after the
+// real thing -- 43 minutes out, in the case that found this -- which is exactly
+// the kind of wrong that looks right, since the timestamps stay plausible and
+// self-consistent. Downstream merges against other timestamped records of the
+// same session (Roll20 chat logs, in the case this tool was built for) silently
+// stop lining up.
+func copyModTime(src, dst string) error {
+	fi, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	return os.Chtimes(dst, fi.ModTime(), fi.ModTime())
 }
 
 // siblingAudioPath derives the lossless-audio sibling file path from

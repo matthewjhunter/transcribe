@@ -59,6 +59,26 @@ on adult voices (~92-96% on clean conversational audio); no ML model,
 no Python sidecar, no extra dependency. The `wxtxt` format intentionally
 strips the label to preserve byte-for-byte WhisperX compatibility.
 
+## The audio sibling carries the source's mtime
+
+`--start-time auto` derives the recording start as **file mtime minus
+duration**, so mtime is not metadata here -- it is the only record of when the
+session actually happened. The extracted `.m4a` sibling is a re-container of
+the same recording, so `extractAudioSibling` stamps it with the source video's
+mtime rather than leaving it at the moment transcribe wrote it.
+
+Without that, transcribing the sibling instead of the original places the
+session however long the extraction run took after the real thing (43 minutes,
+in the run that found this). It is the kind of wrong that looks right: the
+timestamps stay plausible and internally consistent, and only stop matching
+when merged against another timestamped record of the same session -- the
+Roll20 chat log, in the OSG case, which is exactly what absolute timestamps
+exist to support.
+
+Failure to stamp is logged as a warning, not a fatal error: the transcript from
+that run is already correct, and the damage lands later on whoever transcribes
+the sibling.
+
 ## ONNX threadpool sizing
 
 Both ONNX stages are run through sherpa-onnx, and both are hurt by an
