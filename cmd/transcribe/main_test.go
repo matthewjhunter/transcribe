@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/matthewjhunter/transcribe/internal/whisper"
 )
 
 func TestSiblingAudioPath(t *testing.T) {
@@ -120,5 +122,65 @@ func TestResolveStartTime_AutoNeedsDuration(t *testing.T) {
 	}
 	if _, err := resolveStartTime(config{input: f, startTime: "auto"}, 0); err == nil {
 		t.Error("want an error when the duration is unknown")
+	}
+}
+
+// --whisper-url and --whisper-model default from the environment, mirroring
+// --whisper-api-key. Which host in the fleet serves ASR is a property of the
+// machine, not of the invocation, so it belongs in the shell profile rather
+// than in every command line.
+func TestParseFlags_WhisperEndpointFromEnv(t *testing.T) {
+	t.Setenv("WHISPER_URL", "http://192.0.2.10:13305/api/v1")
+	t.Setenv("WHISPER_MODEL", "Whisper-Large-v3-Turbo")
+
+	cfg, err := parseFlags([]string{"--no-diarize", "session.mkv"})
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if cfg.whisperURL != "http://192.0.2.10:13305/api/v1" {
+		t.Errorf("cfg.whisperURL = %q, want the WHISPER_URL value", cfg.whisperURL)
+	}
+	if cfg.whisperModel != "Whisper-Large-v3-Turbo" {
+		t.Errorf("cfg.whisperModel = %q, want the WHISPER_MODEL value", cfg.whisperModel)
+	}
+}
+
+// An explicit flag beats the environment, or the env var becomes impossible to
+// override for a one-off run against a different backend.
+func TestParseFlags_WhisperFlagsBeatEnv(t *testing.T) {
+	t.Setenv("WHISPER_URL", "http://192.0.2.10:13305/api/v1")
+	t.Setenv("WHISPER_MODEL", "Whisper-Large-v3-Turbo")
+
+	cfg, err := parseFlags([]string{
+		"--no-diarize",
+		"--whisper-url", "http://192.0.2.99:13305/api/v1",
+		"--whisper-model", "Whisper-Tiny",
+		"session.mkv",
+	})
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if cfg.whisperURL != "http://192.0.2.99:13305/api/v1" {
+		t.Errorf("cfg.whisperURL = %q, want the flag value", cfg.whisperURL)
+	}
+	if cfg.whisperModel != "Whisper-Tiny" {
+		t.Errorf("cfg.whisperModel = %q, want the flag value", cfg.whisperModel)
+	}
+}
+
+// With nothing set anywhere, the built-in defaults still apply.
+func TestParseFlags_WhisperDefaultsWithoutEnv(t *testing.T) {
+	t.Setenv("WHISPER_URL", "")
+	t.Setenv("WHISPER_MODEL", "")
+
+	cfg, err := parseFlags([]string{"--no-diarize", "session.mkv"})
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if cfg.whisperURL != whisper.DefaultEndpoint {
+		t.Errorf("cfg.whisperURL = %q, want %q", cfg.whisperURL, whisper.DefaultEndpoint)
+	}
+	if cfg.whisperModel != whisper.DefaultModel {
+		t.Errorf("cfg.whisperModel = %q, want %q", cfg.whisperModel, whisper.DefaultModel)
 	}
 }
