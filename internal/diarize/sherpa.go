@@ -49,7 +49,8 @@ type Config struct {
 	MinDurationOff float32
 
 	// NumThreads is the threadpool size for sherpa's segmentation and
-	// embedding stages. Zero defaults to runtime.NumCPU().
+	// embedding stages. Zero defaults to defaultThreads(NumCPU), which
+	// caps the pool -- see the note there.
 	NumThreads int
 
 	// Provider selects the ONNX execution provider for both stages
@@ -84,7 +85,7 @@ func New(cfg Config) (*Diarizer, error) {
 
 	threads := cfg.NumThreads
 	if threads <= 0 {
-		threads = runtime.NumCPU()
+		threads = defaultThreads(runtime.NumCPU())
 	}
 	threshold := cfg.Threshold
 	if threshold == 0 && cfg.NumSpeakers == 0 {
@@ -166,4 +167,22 @@ func (d *Diarizer) Close() error {
 
 func secondsFloat(s float64) time.Duration {
 	return time.Duration(s * float64(time.Second))
+}
+
+// maxDefaultThreads caps the ONNX threadpool chosen when Config.NumThreads is
+// unset. Unlike the VAD, segmentation and embedding are real models that do
+// gain from threads -- but only up to a point, past which the pool costs more
+// to synchronise than the work it saves. Measured over 300 s of audio on a
+// 32-thread Ryzen AI MAX+ 395: 1 thread 39.9 s, 4 threads 15.4 s, 8 threads
+// 12.2 s, 12 threads 14.1 s, 32 threads 24.9 s. Eight sits at the floor of
+// that curve, and taking every core is twice as slow as the optimum.
+const maxDefaultThreads = 8
+
+// defaultThreads picks the threadpool size for a machine with numCPU cores,
+// never exceeding maxDefaultThreads. Small machines still get every core.
+func defaultThreads(numCPU int) int {
+	if numCPU < 1 {
+		return 1
+	}
+	return min(numCPU, maxDefaultThreads)
 }

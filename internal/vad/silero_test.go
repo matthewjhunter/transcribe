@@ -44,3 +44,11 @@ func TestSamplesToDuration(t *testing.T) {
 		})
 	}
 }
+
+// Silero is stepped 512 samples at a time and does not parallelise; the
+// default must stay at one thread regardless of how many cores exist.
+func TestDefaultThreadsIsOne(t *testing.T) {
+	if defaultThreads != 1 {
+		t.Errorf("defaultThreads = %d, want 1 -- raising this slows VAD by ~24x on a 32-thread box", defaultThreads)
+	}
+}

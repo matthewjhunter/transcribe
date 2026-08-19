@@ -18,6 +18,15 @@ import (
 
 const defaultSampleRate = 16000
 
+// defaultThreads is the ONNX threadpool size used when Config.NumThreads is
+// unset. Silero is a ~2 MB model stepped 512 samples at a time, so there is
+// almost nothing in a window to parallelise and the pool's per-window
+// synchronisation dominates the arithmetic. Handing it every core makes it
+// dramatically slower, not faster: measured over 300 s of audio on a
+// 32-thread Ryzen AI MAX+ 395, 1 thread took 0.5 s and 32 took 12.1 s, a 24x
+// penalty. Callers who know better can still override it.
+const defaultThreads = 1
+
 // Config controls a Detector. Empty fields fall back to package defaults.
 type Config struct {
 	// Model is the path to the silero_vad.onnx file. Required.
@@ -54,7 +63,8 @@ type Config struct {
 	BufferSeconds float32
 
 	// NumThreads is the threadpool size for the ONNX runtime.
-	// Zero defaults to runtime.NumCPU().
+	// Zero defaults to defaultThreads (1) -- see the note there before
+	// raising it; more threads measurably slow this model down.
 	NumThreads int
 
 	// Provider selects the ONNX execution provider ("cpu", "cuda", ...).
@@ -119,7 +129,7 @@ func New(cfg Config) (*Detector, error) {
 	}
 	threads := cfg.NumThreads
 	if threads <= 0 {
-		threads = runtime.NumCPU()
+		threads = defaultThreads
 	}
 	debug := 0
 	if cfg.Debug {
