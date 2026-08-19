@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -63,18 +65,47 @@ func TestSiblingAudioPath(t *testing.T) {
 	}
 }
 
-func TestResolveStartTime_EmptyMeansRelative(t *testing.T) {
-	got, err := resolveStartTime(config{}, time.Hour)
-	if err != nil {
-		t.Fatalf("resolveStartTime: %v", err)
+// "relative" (and the empty string, for anyone passing --start-time=) is the
+// opt-out now that "auto" is the default.
+func TestResolveStartTime_RelativeOptOut(t *testing.T) {
+	for _, v := range []string{"", "relative", "Relative", "none"} {
+		got, err := resolveStartTime(discardLogger(), config{startTime: v}, time.Hour)
+		if err != nil {
+			t.Fatalf("resolveStartTime(%q): %v", v, err)
+		}
+		if !got.IsZero() {
+			t.Errorf("resolveStartTime(%q) = %v, want zero time", v, got)
+		}
 	}
-	if !got.IsZero() {
-		t.Errorf("want zero time for an unset flag, got %v", got)
+}
+
+// The default is "auto", so parsing no flags at all must yield absolute
+// timestamps -- that is the whole point of the change.
+func TestParseFlags_StartTimeDefaultsToAuto(t *testing.T) {
+	cfg, err := parseFlags([]string{"--no-diarize", "session.mkv"})
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if cfg.startTime != "auto" {
+		t.Errorf("cfg.startTime = %q, want %q", cfg.startTime, "auto")
+	}
+	if cfg.startTimeSet {
+		t.Error("startTimeSet should be false when the flag was not passed")
+	}
+}
+
+func TestParseFlags_StartTimeSetIsTracked(t *testing.T) {
+	cfg, err := parseFlags([]string{"--no-diarize", "--start-time", "auto", "session.mkv"})
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if !cfg.startTimeSet {
+		t.Error("startTimeSet should be true when the flag was passed explicitly")
 	}
 }
 
 func TestResolveStartTime_Explicit(t *testing.T) {
-	got, err := resolveStartTime(config{startTime: "2026-07-28T20:35:45"}, time.Hour)
+	got, err := resolveStartTime(discardLogger(), config{startTime: "2026-07-28T20:35:45"}, time.Hour)
 	if err != nil {
 		t.Fatalf("resolveStartTime: %v", err)
 	}
@@ -85,7 +116,7 @@ func TestResolveStartTime_Explicit(t *testing.T) {
 }
 
 func TestResolveStartTime_Invalid(t *testing.T) {
-	if _, err := resolveStartTime(config{startTime: "half past eight"}, time.Hour); err == nil {
+	if _, err := resolveStartTime(discardLogger(), config{startTime: "half past eight"}, time.Hour); err == nil {
 		t.Error("want an error for an unparseable start time")
 	}
 }
@@ -104,7 +135,7 @@ func TestResolveStartTime_Auto(t *testing.T) {
 	}
 
 	dur := 3*time.Hour + 14*time.Minute + 56*time.Second
-	got, err := resolveStartTime(config{input: f, startTime: "auto"}, dur)
+	got, err := resolveStartTime(discardLogger(), config{input: f, startTime: "auto", startTimeSet: true}, dur)
 	if err != nil {
 		t.Fatalf("resolveStartTime: %v", err)
 	}
@@ -114,15 +145,49 @@ func TestResolveStartTime_Auto(t *testing.T) {
 	}
 }
 
-func TestResolveStartTime_AutoNeedsDuration(t *testing.T) {
+// Asked for explicitly, an underivable "auto" is an error: the caller said what
+// they wanted and silently not doing it would be worse than stopping.
+func TestResolveStartTime_ExplicitAutoNeedsDuration(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "session.mkv")
 	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := resolveStartTime(config{input: f, startTime: "auto"}, 0); err == nil {
-		t.Error("want an error when the duration is unknown")
+	if _, err := resolveStartTime(discardLogger(), config{input: f, startTime: "auto", startTimeSet: true}, 0); err == nil {
+		t.Error("want an error when the duration is unknown and auto was explicit")
 	}
+}
+
+// Arrived at by default, an underivable "auto" degrades to relative timestamps
+// rather than failing a transcription run that would have worked before.
+func TestResolveStartTime_DefaultAutoDegradesToRelative(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "session.mkv")
+	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveStartTime(discardLogger(), config{input: f, startTime: "auto"}, 0)
+	if err != nil {
+		t.Fatalf("resolveStartTime: %v", err)
+	}
+	if !got.IsZero() {
+		t.Errorf("got %v, want zero time (fall back to relative)", got)
+	}
+}
+
+func TestResolveStartTime_DefaultAutoDegradesOnMissingInput(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "not-there.mkv")
+	got, err := resolveStartTime(discardLogger(), config{input: f, startTime: "auto"}, time.Hour)
+	if err != nil {
+		t.Fatalf("resolveStartTime: %v", err)
+	}
+	if !got.IsZero() {
+		t.Errorf("got %v, want zero time (fall back to relative)", got)
+	}
+}
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 // --whisper-url and --whisper-model default from the environment, mirroring

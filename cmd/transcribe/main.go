@@ -43,6 +43,7 @@ type config struct {
 	outputPath   string
 	outputFormat output.Format
 	startTime    string
+	startTimeSet bool // --start-time was passed explicitly, not defaulted
 
 	whisperURL         string
 	whisperModel       string
@@ -131,10 +132,10 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&cfg.outputPath, "output", "", "Output path. Default: <input-without-ext>.txt next to the input. Use - for stdout.")
 	fs.StringVar(&cfg.outputPath, "o", "", "Shorthand for --output.")
 	fs.StringVar(&format, "output-format", "tstxt", "tstxt | wxtxt | json")
-	fs.StringVar(&cfg.startTime, "start-time", "",
+	fs.StringVar(&cfg.startTime, "start-time", "auto",
 		`Wall-clock start of the recording, making tstxt timestamps absolute instead of `+
-			`relative. "auto" derives it as file mtime minus duration. Or pass `+
-			`2006-01-02T15:04:05 explicitly. Empty (default) keeps relative timestamps.`)
+			`relative. "auto" (default) derives it as file mtime minus duration. Or pass `+
+			`2006-01-02T15:04:05 explicitly, or "relative" for offsets from the start.`)
 	fs.StringVar(&cfg.whisperURL, "whisper-url", urlDefault, "OpenAI-compatible /v1 base URL; defaults to $WHISPER_URL.")
 	fs.StringVar(&cfg.whisperModel, "whisper-model", modelDefault, "Model name passed to the backend; defaults to $WHISPER_MODEL.")
 	fs.StringVar(&cfg.whisperAPIKey, "whisper-api-key", apiKeyDefault, "Bearer token; defaults to $WHISPER_API_KEY.")
@@ -184,6 +185,12 @@ func parseFlags(args []string) (config, error) {
 		return config{}, errors.New("transcribe: exactly one input file is required")
 	}
 	cfg.input = fs.Arg(0)
+
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "start-time" {
+			cfg.startTimeSet = true
+		}
+	})
 
 	if !cfg.noDiarize && cfg.numSpeakers <= 0 {
 		fs.Usage()
@@ -331,7 +338,7 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 		return err
 	}
 	defer closeFn()
-	start, err := resolveStartTime(cfg, probe.Duration)
+	start, err := resolveStartTime(log, cfg, probe.Duration)
 	if err != nil {
 		return err
 	}
@@ -353,27 +360,45 @@ func transcribeOne(ctx context.Context, log *slog.Logger, cfg config) error {
 // available, and unlike birth time it does not depend on the filesystem
 // supporting statx. It does assume mtime was preserved -- a copy made without
 // -p will have moved it, so pass an explicit timestamp in that case.
-func resolveStartTime(cfg config, dur time.Duration) (time.Time, error) {
-	switch cfg.startTime {
-	case "":
+//
+// "auto" is the default, which changes what a failure to derive it should mean.
+// Asked for explicitly it is an error; arrived at by default it degrades to
+// relative timestamps with a warning, so that making absolute times the default
+// cannot break a run that used to work.
+func resolveStartTime(log *slog.Logger, cfg config, dur time.Duration) (time.Time, error) {
+	switch strings.ToLower(cfg.startTime) {
+	case "", "relative", "none":
 		return time.Time{}, nil
 	case "auto":
-		if dur <= 0 {
-			return time.Time{}, fmt.Errorf("--start-time auto: input duration is unknown")
+		t, err := autoStartTime(cfg.input, dur)
+		if err == nil {
+			return t, nil
 		}
-		fi, err := os.Stat(cfg.input)
-		if err != nil {
-			return time.Time{}, fmt.Errorf("--start-time auto: %w", err)
+		if cfg.startTimeSet {
+			return time.Time{}, err
 		}
-		return fi.ModTime().Add(-dur), nil
+		log.Warn("falling back to relative timestamps", "reason", err,
+			"hint", `pass --start-time 2006-01-02T15:04:05 for absolute times`)
+		return time.Time{}, nil
 	default:
 		t, err := time.ParseInLocation(output.AbsoluteLayout, cfg.startTime, time.Local)
 		if err != nil {
-			return time.Time{}, fmt.Errorf("--start-time %q: want %q or \"auto\": %w",
+			return time.Time{}, fmt.Errorf("--start-time %q: want %q, \"auto\" or \"relative\": %w",
 				cfg.startTime, output.AbsoluteLayout, err)
 		}
 		return t, nil
 	}
+}
+
+func autoStartTime(input string, dur time.Duration) (time.Time, error) {
+	if dur <= 0 {
+		return time.Time{}, errors.New("--start-time auto: input duration is unknown")
+	}
+	fi, err := os.Stat(input)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("--start-time auto: %w", err)
+	}
+	return fi.ModTime().Add(-dur), nil
 }
 
 // applyVoiceLabels classifies each diarization cluster by median F0
