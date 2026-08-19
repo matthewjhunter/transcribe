@@ -68,6 +68,7 @@ type config struct {
 	minSpeechDur     float64
 	minSilenceDur    float64
 	diarizeThreads   int
+	vadThreads       int
 	diarizeProvider  string
 	embeddingPreset  string
 	segmentationOnnx string
@@ -102,6 +103,16 @@ func run() error {
 	return nil
 }
 
+// envOr returns the environment variable's value, or fallback when it is unset
+// or empty. Empty is treated as unset so that WHISPER_URL= in a profile clears
+// the override rather than pointing the client at "".
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func parseFlags(args []string) (config, error) {
 	fs := flag.NewFlagSet("transcribe", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -111,7 +122,12 @@ func parseFlags(args []string) (config, error) {
 		format  string
 		showVer bool
 	)
+	// Which host in the fleet serves ASR is a property of the machine, not of
+	// the invocation, so it is settable once in the shell profile. An explicit
+	// flag still wins -- flag.StringVar's default is only used when unset.
 	apiKeyDefault := os.Getenv("WHISPER_API_KEY")
+	urlDefault := envOr("WHISPER_URL", whisper.DefaultEndpoint)
+	modelDefault := envOr("WHISPER_MODEL", whisper.DefaultModel)
 
 	fs.StringVar(&cfg.outputPath, "output", "", "Output path. Default: <input-without-ext>.txt next to the input. Use - for stdout.")
 	fs.StringVar(&cfg.outputPath, "o", "", "Shorthand for --output.")
@@ -120,8 +136,8 @@ func parseFlags(args []string) (config, error) {
 		`Wall-clock start of the recording, making tstxt timestamps absolute instead of `+
 			`relative. "auto" (default) derives it as file mtime minus duration. Or pass `+
 			`2006-01-02T15:04:05 explicitly, or "relative" for offsets from the start.`)
-	fs.StringVar(&cfg.whisperURL, "whisper-url", whisper.DefaultEndpoint, "OpenAI-compatible /v1 base URL.")
-	fs.StringVar(&cfg.whisperModel, "whisper-model", whisper.DefaultModel, "Model name passed to the backend.")
+	fs.StringVar(&cfg.whisperURL, "whisper-url", urlDefault, "OpenAI-compatible /v1 base URL; defaults to $WHISPER_URL.")
+	fs.StringVar(&cfg.whisperModel, "whisper-model", modelDefault, "Model name passed to the backend; defaults to $WHISPER_MODEL.")
 	fs.StringVar(&cfg.whisperAPIKey, "whisper-api-key", apiKeyDefault, "Bearer token; defaults to $WHISPER_API_KEY.")
 	fs.IntVar(&cfg.whisperConcurrency, "whisper-concurrency", 1, "Parallel transcription requests when VAD chunking is on.")
 	fs.StringVar(&cfg.language, "language", "en", "ISO-639-1 language hint. Empty for auto-detect.")
@@ -138,7 +154,8 @@ func parseFlags(args []string) (config, error) {
 	fs.IntVar(&cfg.numSpeakers, "num-speakers", 0, "Required (unless --no-diarize). Number of distinct speakers in the recording.")
 	fs.Float64Var(&cfg.minSpeechDur, "min-speech-duration", 0, "Drop speech segments shorter than N seconds. 0 = sherpa default.")
 	fs.Float64Var(&cfg.minSilenceDur, "min-silence-duration", 0, "Merge speech segments separated by < N seconds of silence. 0 = sherpa default.")
-	fs.IntVar(&cfg.diarizeThreads, "diarize-threads", 0, "Threads for sherpa segmentation/embedding stages. 0 = NumCPU.")
+	fs.IntVar(&cfg.diarizeThreads, "diarize-threads", 0, "Threads for sherpa segmentation/embedding stages. 0 = min(NumCPU, 8).")
+	fs.IntVar(&cfg.vadThreads, "vad-threads", 0, "Threads for the Silero VAD. 0 = 1; raising it makes VAD slower, not faster.")
 	fs.StringVar(&cfg.diarizeProvider, "diarize-provider", "", "ONNX execution provider for diarization (cpu|cuda|...). Empty = cpu.")
 	fs.StringVar(&cfg.embeddingPreset, "embedding-preset", string(diarize.DefaultEmbeddingPreset),
 		"Speaker-embedding preset: "+joinPresets()+". Ignored when --embedding-model is set.")
@@ -464,7 +481,7 @@ func planVADChunks(ctx context.Context, log *slog.Logger, cfg config, samples []
 		SampleRate:         sampleRate,
 		MinSilenceDuration: float32(cfg.vadMinSilence),
 		MaxSpeechDuration:  float32(cfg.vadMaxChunk),
-		NumThreads:         cfg.diarizeThreads,
+		NumThreads:         cfg.vadThreads,
 		Provider:           cfg.diarizeProvider,
 		Debug:              cfg.verbose,
 	})

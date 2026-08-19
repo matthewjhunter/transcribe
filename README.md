@@ -41,6 +41,14 @@ transcribe --num-speakers 4 path/to/recording.mkv
 
 # Pin to a specific Lemonade host
 transcribe --whisper-url http://halo:13305/api/v1 --num-speakers 4 session.mkv
+```
+
+Or set it once, per machine, and drop the flag:
+
+```bash
+export WHISPER_URL=http://halo:13305/api/v1
+export WHISPER_MODEL=Whisper-Large-v3-Turbo
+transcribe --num-speakers 4 session.mkv
 
 # Match the historical WhisperX `[SPEAKER_NN]: text` format byte-for-byte
 transcribe --output-format wxtxt --num-speakers 4 session.mkv
@@ -127,7 +135,8 @@ All sherpa-onnx diarization parameters are exposed for experimentation:
 | `--num-speakers` | (required) | `FastClusteringConfig.NumClusters`. Number of distinct speakers in the recording. |
 | `--min-speech-duration` | 0 | `OfflineSpeakerDiarizationConfig.MinDurationOn` (seconds). Drops short voice-activity segments at the segmenter. |
 | `--min-silence-duration` | 0 | `OfflineSpeakerDiarizationConfig.MinDurationOff` (seconds). Merges adjacent speech across short silences. |
-| `--diarize-threads` | 0 (NumCPU) | Threadpool size for sherpa's segmentation and embedding stages. |
+| `--diarize-threads` | 0 (min(NumCPU, 8)) | Threadpool size for sherpa's segmentation and embedding stages. Capped because past ~8 the pool costs more to synchronise than it saves. |
+| `--vad-threads` | 0 (1) | Threadpool size for the Silero VAD. Raising it makes VAD slower, not faster -- the model is stepped 512 samples at a time and has nothing to parallelise. |
 | `--diarize-provider` | `""` (cpu) | ONNX execution provider (`cpu`, `cuda`, ...). |
 | `--embedding-preset` | `titanet_large` | `titanet_small` (~22 MB, fast, low accuracy on similar voices) or `titanet_large` (~95 MB, default). |
 | `--segmentation-model` | auto-cache | Path to pyannote segmentation ONNX. |
