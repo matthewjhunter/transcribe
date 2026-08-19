@@ -59,6 +59,37 @@ on adult voices (~92-96% on clean conversational audio); no ML model,
 no Python sidecar, no extra dependency. The `wxtxt` format intentionally
 strips the label to preserve byte-for-byte WhisperX compatibility.
 
+## ONNX threadpool sizing
+
+Both ONNX stages are run through sherpa-onnx, and both are hurt by an
+oversized threadpool -- in opposite proportions, which is why the defaults are
+not the same and are not `NumCPU`.
+
+Measured over 300 s of audio on a 32-thread Ryzen AI MAX+ 395:
+
+| threads | VAD | diarization |
+|---|---|---|
+| 1 | 0.5 s | 39.9 s |
+| 4 | 0.4 s | 15.4 s |
+| 8 | 0.6 s | 12.2 s |
+| 32 (`NumCPU`) | 12.1 s | 24.9 s |
+
+Silero is a ~2 MB model stepped 512 samples at a time: there is nothing in a
+window to parallelise, so the pool's per-window synchronisation is pure
+overhead and one thread wins by 24x. Segmentation and embedding are real
+models that do gain from threads, but only to about eight; beyond that
+synchronisation outweighs the work saved and `NumCPU` lands at twice the
+optimum. Hence `--vad-threads` defaults to 1 and `--diarize-threads` to
+`min(NumCPU, 8)`.
+
+These are separate flags on purpose. They were once a single `--diarize-threads`
+that fed both stages, so tuning diarization upward silently retuned VAD in the
+wrong direction -- and the VAD cost hid behind a flag named for the other
+stage. On a real 3 h session that mistake cost 4m18s of a 21m48s run.
+
+Output is byte-identical at every thread count; this is purely a performance
+knob.
+
 ## Backend choice
 
 Whisper backend is OpenAI-compatible HTTP, configurable via flag/env:

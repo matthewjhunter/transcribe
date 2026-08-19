@@ -67,6 +67,7 @@ type config struct {
 	minSpeechDur     float64
 	minSilenceDur    float64
 	diarizeThreads   int
+	vadThreads       int
 	diarizeProvider  string
 	embeddingPreset  string
 	segmentationOnnx string
@@ -152,7 +153,8 @@ func parseFlags(args []string) (config, error) {
 	fs.IntVar(&cfg.numSpeakers, "num-speakers", 0, "Required (unless --no-diarize). Number of distinct speakers in the recording.")
 	fs.Float64Var(&cfg.minSpeechDur, "min-speech-duration", 0, "Drop speech segments shorter than N seconds. 0 = sherpa default.")
 	fs.Float64Var(&cfg.minSilenceDur, "min-silence-duration", 0, "Merge speech segments separated by < N seconds of silence. 0 = sherpa default.")
-	fs.IntVar(&cfg.diarizeThreads, "diarize-threads", 0, "Threads for sherpa segmentation/embedding stages. 0 = NumCPU.")
+	fs.IntVar(&cfg.diarizeThreads, "diarize-threads", 0, "Threads for sherpa segmentation/embedding stages. 0 = min(NumCPU, 8).")
+	fs.IntVar(&cfg.vadThreads, "vad-threads", 0, "Threads for the Silero VAD. 0 = 1; raising it makes VAD slower, not faster.")
 	fs.StringVar(&cfg.diarizeProvider, "diarize-provider", "", "ONNX execution provider for diarization (cpu|cuda|...). Empty = cpu.")
 	fs.StringVar(&cfg.embeddingPreset, "embedding-preset", string(diarize.DefaultEmbeddingPreset),
 		"Speaker-embedding preset: "+joinPresets()+". Ignored when --embedding-model is set.")
@@ -454,7 +456,7 @@ func planVADChunks(ctx context.Context, log *slog.Logger, cfg config, samples []
 		SampleRate:         sampleRate,
 		MinSilenceDuration: float32(cfg.vadMinSilence),
 		MaxSpeechDuration:  float32(cfg.vadMaxChunk),
-		NumThreads:         cfg.diarizeThreads,
+		NumThreads:         cfg.vadThreads,
 		Provider:           cfg.diarizeProvider,
 		Debug:              cfg.verbose,
 	})

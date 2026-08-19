@@ -184,3 +184,24 @@ func TestParseFlags_WhisperDefaultsWithoutEnv(t *testing.T) {
 		t.Errorf("cfg.whisperModel = %q, want %q", cfg.whisperModel, whisper.DefaultModel)
 	}
 }
+
+// --vad-threads is separate from --diarize-threads. They were once the same
+// knob, which hid the VAD's thread penalty behind a flag named for the other
+// stage: tuning diarization silently retuned VAD in the opposite direction.
+func TestParseFlags_VADThreadsIsSeparateFromDiarizeThreads(t *testing.T) {
+	cfg, err := parseFlags([]string{"--no-diarize", "--diarize-threads", "8", "session.mkv"})
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if cfg.vadThreads != 0 {
+		t.Errorf("cfg.vadThreads = %d, want 0 -- --diarize-threads must not set it", cfg.vadThreads)
+	}
+
+	cfg, err = parseFlags([]string{"--no-diarize", "--vad-threads", "4", "session.mkv"})
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if cfg.vadThreads != 4 || cfg.diarizeThreads != 0 {
+		t.Errorf("vadThreads=%d diarizeThreads=%d, want 4 and 0", cfg.vadThreads, cfg.diarizeThreads)
+	}
+}
