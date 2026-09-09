@@ -1,6 +1,6 @@
 module github.com/matthewjhunter/transcribe
 
-go 1.25.0
+go 1.26.0
 
 toolchain go1.26.5
 
@@ -8,7 +8,7 @@ require (
 	github.com/go-audio/audio v1.0.0
 	github.com/go-audio/wav v1.1.0
 	github.com/k2-fsa/sherpa-onnx-go v1.13.4
-	golang.org/x/sync v0.22.0
+	golang.org/x/sync v0.23.0
 )
 
 require (
